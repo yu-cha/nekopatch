@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <title>ねこパッチ</title>
+  <!-- ホーム画面のアイコン。index.html の #catIcon と同じ猫を、明るい色の設定（cat、r0、catface の色）で描く。
+       背景を端まで塗り、猫を真ん中の 6 割に収める（Android が丸や角丸に切り抜いても欠けないように） -->
+  <rect width="100" height="100" fill="#bfe1ee"/>
+  <g transform="translate(20 20) scale(0.6)">
+    <path d="M14 40 L18 8 L42 26 Q50 24 58 26 L82 8 L86 40 Q92 54 86 68 Q74 92 50 92 Q26 92 14 68 Q8 54 14 40Z" fill="#2b2e38"/>
+    <path d="M22 18 L36 29 L24 34Z M78 18 L64 29 L76 34Z" fill="#f4c3cc"/>
+    <ellipse cx="35" cy="54" rx="6.5" ry="8" fill="#f4f1ea"/>
+    <ellipse cx="65" cy="54" rx="6.5" ry="8" fill="#f4f1ea"/>
+    <ellipse cx="36.5" cy="55" rx="3" ry="5" fill="#2b2e38"/>
+    <ellipse cx="66.5" cy="55" rx="3" ry="5" fill="#2b2e38"/>
+    <path d="M45 67 L55 67 L50 72Z" fill="#f4c3cc"/>
+    <path d="M50 72 Q46 78 40 76 M50 72 Q54 78 60 76" stroke="#f4f1ea" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+  </g>
+</svg>

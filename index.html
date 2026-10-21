@@ -2,103 +2,21 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
+<!-- 読み込むのは、このサイトのファイルと Google Fonts だけ。通信（fetch など）は禁止する。記録はネットに送らない（docs/requirements-agreement-2026-10-21.md の 1） -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; manifest-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>ねこパッチ</title>
+<meta name="description" content="猫を置くパズルのゲーム">
 <meta name="claude:viewport-fit-sides" content="cover">
+<link rel="manifest" href="./manifest.webmanifest">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&family=Zen+Maru+Gothic:wght@500;700&display=swap">
-<style>
-/* Layout: one-screen app — compact header, a big square quilt board, a tool row under it. */
-:root{
-  --bg:#e9edf1; --panel:#f8f9fb; --fg:#272b36; --muted:#6b7282; --line:#c4cad4;
-  --edge:#2f3442; --accent:#d9682b; --accent-fg:#fff; --bad:#d23b3b; --hint:#2a7de1;
-  --x:#5b6170; --cat:#2b2e38; --catface:#f4f1ea;
-  --r0:#f4c3cc; --r1:#bfe1ee; --r2:#f5e19c; --r3:#c8e3b1; --r4:#d5c7ee;
-  --r5:#f7cba0; --r6:#a9bdef; --r7:#d8c0a2; --r8:#d2d4d0; --r9:#ee9f98;
-  --display:"Mochiy Pop One","Zen Maru Gothic","Hiragino Maru Gothic ProN",sans-serif;
-  --body:"Zen Maru Gothic","Hiragino Maru Gothic ProN","Yu Gothic",sans-serif;
-}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#171a21; --panel:#222631; --fg:#e9e7e2; --muted:#9aa0ad; --line:#3a3f4c;
-  --edge:#0b0d12; --accent:#ee8443; --accent-fg:#1a1208; --bad:#ff6b6b; --hint:#5aa2ff;
-  --x:#2a2e38; --cat:#1d2029; --catface:#f4f1ea;
-  --r0:#c98a97; --r1:#82b6c9; --r2:#cdb565; --r3:#8fb87a; --r4:#a495c9;
-  --r5:#cf9767; --r6:#7a90c9; --r7:#ad9372; --r8:#a3a6a1; --r9:#c96d66;
-  color-scheme:dark}}
-:root[data-theme="dark"]{
-  --bg:#171a21; --panel:#222631; --fg:#e9e7e2; --muted:#9aa0ad; --line:#3a3f4c;
-  --edge:#0b0d12; --accent:#ee8443; --accent-fg:#1a1208; --bad:#ff6b6b; --hint:#5aa2ff;
-  --x:#2a2e38; --cat:#1d2029; --catface:#f4f1ea;
-  --r0:#c98a97; --r1:#82b6c9; --r2:#cdb565; --r3:#8fb87a; --r4:#a495c9;
-  --r5:#cf9767; --r6:#7a90c9; --r7:#ad9372; --r8:#a3a6a1; --r9:#c96d66;
-  color-scheme:dark}
-[hidden]{display:none!important}
-html,body{height:100%;margin:0}
-*,*::before,*::after{box-sizing:border-box}
-body{background:var(--bg);color:var(--fg);font-family:var(--body);
-  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
-  -webkit-user-select:none;user-select:none}
-.app{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:10px;padding-block:12px 20px}
-header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:space-between}
-h1{font-family:var(--display);font-weight:400;font-size:1.5rem;margin:0;letter-spacing:.02em;display:flex;align-items:center;gap:8px}
-h1 svg{width:30px;height:30px}
-.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-select,button{font-family:var(--body);font-weight:700;font-size:.95rem;color:var(--fg);background:var(--panel);
-  border:1.5px solid var(--line);border-radius:10px;padding:7px 12px;cursor:pointer}
-select:focus-visible,button:focus-visible{outline:3px solid var(--hint);outline-offset:2px}
-button:hover,select:hover{border-color:var(--muted)}
-button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
-button:disabled{opacity:.4;cursor:default}
-.status{display:flex;justify-content:space-between;align-items:center;font-size:.95rem;color:var(--muted);gap:10px;flex-wrap:wrap}
-.status b{color:var(--fg);font-variant-numeric:tabular-nums}
-.boardwrap{position:relative;display:flex;justify-content:center}
-#board{--n:8;display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));grid-template-rows:repeat(var(--n),minmax(0,1fr));gap:0;box-sizing:border-box;
-  width:min(100%, calc(100vh - 230px), 720px);min-width:260px;aspect-ratio:1/1;max-width:100%;
-  border:3px solid var(--edge);border-radius:10px;overflow:hidden;touch-action:none;background:var(--edge)}
-.cell{position:relative;min-width:0;min-height:0;overflow:hidden;display:flex;align-items:center;justify-content:center;cursor:pointer;
-  box-shadow:inset 0 0 0 .5px rgba(0,0,0,.18)}
-.cell svg{width:72%;height:72%;pointer-events:none}
-.cell.x svg{width:38%;height:38%}
-.cell.bad::after{content:"";position:absolute;inset:3px;border:3px solid var(--bad);border-radius:8px;pointer-events:none}
-.cell.focus::before{content:"";position:absolute;inset:0;background:var(--hint);opacity:.18;pointer-events:none}
-.cell.target::after{content:"";position:absolute;inset:3px;border:3px dashed var(--hint);border-radius:8px;pointer-events:none;animation:pulse 1.2s ease-in-out infinite}
-.cell.wrong::after{content:"";position:absolute;inset:3px;border:3px solid var(--bad);border-radius:8px;pointer-events:none;animation:pulse 1.2s ease-in-out infinite}
-@keyframes pulse{50%{opacity:.35}}
-.cell.pop svg{animation:pop .18s ease-out}
-@keyframes pop{from{transform:scale(.6)}to{transform:scale(1)}}
-@media (prefers-reduced-motion: reduce){.cell.target::after,.cell.wrong::after,.cell.pop svg{animation:none}}
-.tools{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
-.toggle{display:flex;align-items:center;gap:6px;font-weight:700;font-size:.9rem;cursor:pointer;color:var(--fg)}
-.toggle input{width:18px;height:18px;accent-color:var(--accent)}
-#msg{min-height:3em;background:var(--panel);border:1.5px solid var(--line);border-radius:12px;padding:10px 14px;
-  font-size:.95rem;line-height:1.6;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
-#msg span{flex:1;min-width:0}
-.help{font-size:.85rem;color:var(--muted);line-height:1.7}
-.help b{color:var(--fg)}
-#loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-weight:700;
-  background:color-mix(in srgb,var(--bg) 70%,transparent);border-radius:10px}
-#win{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
-#win .card{background:var(--panel);border:2px solid var(--edge);border-radius:16px;padding:22px 28px;text-align:center;
-  display:flex;flex-direction:column;gap:10px;align-items:center;box-shadow:0 10px 30px rgba(0,0,0,.25)}
-#win h2{font-family:var(--display);font-weight:400;margin:0;font-size:1.6rem}
-#win p{margin:0;color:var(--muted)}
-.rec{background:var(--panel);border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:12px}
-.rec h3{margin:0;font-size:1rem;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
-.rec .tbl{overflow-x:auto}
-.rec table{border-collapse:collapse;width:100%;font-size:.88rem;font-variant-numeric:tabular-nums}
-.rec th,.rec td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
-.rec th:first-child,.rec td:first-child{text-align:left}
-.rec th{color:var(--muted);font-weight:700}
-.rec tr.cur td{background:color-mix(in srgb,var(--accent) 14%,transparent)}
-.faster{color:#2e9d5b;font-weight:700}.slower{color:var(--bad);font-weight:700}
-.rec .empty{color:var(--muted);font-size:.9rem;margin:0}
-.rec button{font-size:.85rem;padding:5px 10px}
-#winCompare{font-size:.95rem;color:var(--fg)}
-</style>
+<script type="module" src="/src/ui/web/main.ts"></script>
 </head>
 <body>
 
 <div class="app">
+  <p class="trial" id="trialNote" hidden>確かめ用のページです。ここで遊んだ記録や読み込んだ記録は、本物のねこパッチには入りません。</p>
   <header>
     <h1><svg viewBox="0 0 100 100" aria-hidden="true"><use href="#catIcon"/></svg>ねこパッチ</h1>
     <div class="controls">
@@ -109,7 +27,7 @@ button:disabled{opacity:.4;cursor:default}
       <select id="diff" aria-label="難しさ">
         <option value="1">かんたん</option><option value="2" selected>ふつう</option><option value="3">むずかしい</option>
       </select>
-      <button id="newBtn" class="primary">新しい問題</button>
+      <button type="button" id="newBtn" class="primary">新しい問題</button>
     </div>
   </header>
 
@@ -121,31 +39,43 @@ button:disabled{opacity:.4;cursor:default}
   </div>
 
   <div class="boardwrap">
+    <!-- biome-ignore lint/a11y/useSemanticElements: 元の画面のまま。マスは並べ替えの無い格子で、表（table）にすると見た目が変わる -->
     <div id="board" role="grid" aria-label="盤面"></div>
     <div id="loading" hidden>問題を作っています…</div>
     <div id="win" hidden><div class="card">
       <h2>クリア！</h2><p id="winText"></p><p id="winCompare"></p>
-      <button class="primary" id="winNext">次の問題</button>
+      <button type="button" class="primary" id="winNext">次の問題</button>
     </div></div>
   </div>
 
   <div class="tools">
-    <button id="undoBtn">↶ 戻す</button>
-    <button id="redoBtn">↷ 進む</button>
-    <button id="hintBtn">ヒント</button>
-    <button id="clearXBtn">×を全部消す</button>
-    <button id="resetBtn">最初から</button>
-    <button id="recBtn">記録</button>
+    <button type="button" id="undoBtn">↶ 戻す</button>
+    <button type="button" id="redoBtn">↷ 進む</button>
+    <button type="button" id="hintBtn">ヒント</button>
+    <button type="button" id="clearXBtn">×を全部消す</button>
+    <button type="button" id="resetBtn">最初から</button>
+    <button type="button" id="recBtn">記録</button>
     <label class="toggle"><input type="checkbox" id="autoX"> 猫の周りに自動で×</label>
   </div>
 
-  <div id="msg"><span id="msgText">クリックで ×、もう一度で 猫、もう一度で 空白。<b>なぞると×を一気に</b>付けられます。</span><button id="applyBtn" hidden>この×を付ける</button></div>
+  <div id="msg"><span id="msgText">クリックで ×、もう一度で 猫、もう一度で 空白。<b>なぞると×を一気に</b>付けられます。</span><button type="button" id="applyBtn" hidden>この×を付ける</button></div>
 
   <section class="rec" id="recPanel" hidden>
-    <h3>同じ盤面・難しさごとの成績 <button id="recClose">閉じる</button></h3>
+    <h3>同じ盤面・難しさごとの成績 <button type="button" id="recClose">閉じる</button></h3>
     <div class="tbl" id="recSummary"></div>
-    <h3>最近の記録 <button id="recClear">記録を全部消す</button></h3>
+    <h3>最近の記録 <button type="button" id="recClear">記録を全部消す</button></h3>
     <div class="tbl" id="recList"></div>
+    <h3>記録の保存</h3>
+    <p class="note" id="recKeep">確かめています…</p>
+    <p class="note bad" id="recSaveError" hidden>記録を保存できませんでした。スマホの空きが足りないかもしれません。くろに相談してください。</p>
+    <p class="note" id="recUnreadable" hidden>読めない記録がありました。消さずに別の場所に残してあります。くろに相談してください。</p>
+    <div class="row">
+      <button type="button" id="recExport">記録を書き出す</button>
+      <button type="button" id="recImport">記録を読み込む</button>
+      <input type="file" id="recFile" accept=".json,application/json" hidden>
+    </div>
+    <p class="note" id="recImportMsg" hidden></p>
+    <p class="note">機種変更のときに使います。古いスマホで「記録を書き出す」を押してファイルにし、新しいスマホで「記録を読み込む」からそのファイルを選びます。</p>
   </section>
 
   <div class="help">
@@ -155,7 +85,7 @@ button:disabled{opacity:.4;cursor:default}
   </div>
 </div>
 
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<svg class="sprite" width="0" height="0" aria-hidden="true">
   <defs>
     <symbol id="catIcon" viewBox="0 0 100 100">
       <path d="M14 40 L18 8 L42 26 Q50 24 58 26 L82 8 L86 40 Q92 54 86 68 Q74 92 50 92 Q26 92 14 68 Q8 54 14 40Z" fill="var(--cat)"/>
@@ -172,567 +102,6 @@ button:disabled{opacity:.4;cursor:default}
     </symbol>
   </defs>
 </svg>
-
-<script id="core">
-// ===== Meowdoku core: generator + solvers =====
-function rnd(n){return Math.floor(Math.random()*n);}
-function shuffle(a){for(let i=a.length-1;i>0;i--){const j=rnd(i+1);[a[i],a[j]]=[a[j],a[i]];}return a;}
-
-// random cat placement: one per row/col, no adjacency between consecutive rows
-function randomCats(N){
-  const pos=new Array(N), used=new Array(N).fill(false);
-  function bt(r){
-    if(r===N) return true;
-    const cols=shuffle([...Array(N).keys()]);
-    for(const c of cols){
-      if(used[c]) continue;
-      if(r>0 && Math.abs(pos[r-1]-c)<=1) continue;
-      used[c]=true; pos[r]=c;
-      if(bt(r+1)) return true;
-      used[c]=false;
-    }
-    return false;
-  }
-  bt(0); return pos;
-}
-
-// grow regions from cat seeds
-function growRegions(N,cats){
-  const reg=new Array(N*N).fill(-1);
-  const frontier=[];
-  for(let r=0;r<N;r++){reg[r*N+cats[r]]=r;}
-  // weights make some regions grow faster -> varied sizes
-  const w=[]; for(let i=0;i<N;i++) w.push(0.3+Math.random()*Math.random()*3);
-  let left=N*N-N;
-  while(left>0){
-    // pick region by weight that has an unassigned neighbor
-    let tot=0; const cand=[];
-    for(let k=0;k<N;k++){
-      const opts=[];
-      for(let i=0;i<N*N;i++){ if(reg[i]!==k) continue;
-        const r=(i/N)|0,c=i%N;
-        if(r>0&&reg[i-N]<0)opts.push(i-N);
-        if(r<N-1&&reg[i+N]<0)opts.push(i+N);
-        if(c>0&&reg[i-1]<0)opts.push(i-1);
-        if(c<N-1&&reg[i+1]<0)opts.push(i+1);
-      }
-      if(opts.length){cand.push([k,opts]);tot+=w[k];}
-    }
-    let x=Math.random()*tot, pick=cand[cand.length-1];
-    for(const cd of cand){x-=w[cd[0]]; if(x<=0){pick=cd;break;}}
-    const cell=pick[1][rnd(pick[1].length)];
-    reg[cell]=pick[0]; left--;
-  }
-  return reg;
-}
-
-// count solutions (stop at limit)
-function countSolutions(N,reg,limit=2){
-  let count=0;
-  const pos=new Array(N);
-  function bt(r,colMask,regMask){
-    if(r===N){count++;return count>=limit;}
-    for(let c=0;c<N;c++){
-      if(colMask&(1<<c)) continue;
-      if(r>0&&Math.abs(pos[r-1]-c)<=1) continue;
-      const g=reg[r*N+c];
-      if(regMask&(1<<g)) continue;
-      pos[r]=c;
-      if(bt(r+1,colMask|(1<<c),regMask|(1<<g))) return true;
-    }
-    return false;
-  }
-  bt(0,0,0);
-  return count;
-}
-
-
-// find a solution different from `cats` (or null)
-function altSolution(N,reg,cats){
-  const pos=new Array(N); let found=null;
-  function bt(r,colMask,regMask,diff){
-    if(r===N){ if(diff){found=pos.slice();return true;} return false; }
-    for(let c=0;c<N;c++){
-      if(colMask&(1<<c)) continue;
-      if(r>0&&Math.abs(pos[r-1]-c)<=1) continue;
-      const g=reg[r*N+c]; if(regMask&(1<<g)) continue;
-      pos[r]=c;
-      if(bt(r+1,colMask|(1<<c),regMask|(1<<g),diff||c!==cats[r])) return true;
-    }
-    return false;
-  }
-  bt(0,0,0,false); return found;
-}
-function connectedWithout(N,reg,k,skip){
-  const cells=[]; for(let i=0;i<N*N;i++) if(reg[i]===k&&i!==skip) cells.push(i);
-  if(!cells.length) return false;
-  const seen=new Set([cells[0]]), q=[cells[0]];
-  while(q.length){const i=q.pop(),r=(i/N)|0,c=i%N;
-    const nb=[]; if(r>0)nb.push(i-N); if(r<N-1)nb.push(i+N); if(c>0)nb.push(i-1); if(c<N-1)nb.push(i+1);
-    for(const j of nb) if(j!==skip&&reg[j]===k&&!seen.has(j)){seen.add(j);q.push(j);} }
-  return seen.size===cells.length;
-}
-// tweak regions until unique; returns true on success
-function makeUnique(N,reg,cats,maxIter=60){
-  const seed=new Set(cats.map((c,r)=>r*N+c));
-  for(let it=0;it<maxIter;it++){
-    const alt=altSolution(N,reg,cats);
-    if(!alt) return true;
-    // cells of alt not in intended solution
-    const bad=shuffle(alt.map((c,r)=>r*N+c).filter(i=>!seed.has(i)));
-    let done=false;
-    for(const i of bad){
-      const r=(i/N)|0,c=i%N,k=reg[i];
-      const nb=[]; if(r>0)nb.push(i-N); if(r<N-1)nb.push(i+N); if(c>0)nb.push(i-1); if(c<N-1)nb.push(i+1);
-      const opts=shuffle([...new Set(nb.map(j=>reg[j]).filter(g=>g!==k))]);
-      if(!opts.length||!connectedWithout(N,reg,k,i)) continue;
-      reg[i]=opts[0]; done=true; break;
-    }
-    if(!done) return false;
-  }
-  return !altSolution(N,reg,cats);
-}
-
-// ---------- logical deduction ----------
-// state: arr of 0=unknown,1=X,2=cat
-function neighbors8(N,i){
-  const r=(i/N)|0,c=i%N,out=[];
-  for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
-    if(!dr&&!dc)continue;const rr=r+dr,cc=c+dc;
-    if(rr>=0&&rr<N&&cc>=0&&cc<N)out.push(rr*N+cc);
-  }
-  return out;
-}
-function groups(N,reg){
-  const rows=[],cols=[],regs=[];
-  for(let k=0;k<N;k++){rows.push([]);cols.push([]);regs.push([]);}
-  for(let i=0;i<N*N;i++){rows[(i/N)|0].push(i);cols[i%N].push(i);regs[reg[i]].push(i);}
-  return {rows,cols,regs};
-}
-// "attacks" of cell i: all cells that can't hold a cat if i is a cat
-function attacks(N,reg,i){
-  const s=new Set(), r=(i/N)|0,c=i%N;
-  for(let k=0;k<N;k++){s.add(r*N+k);s.add(k*N+c);}
-  for(let j=0;j<N*N;j++) if(reg[j]===reg[i]) s.add(j);
-  for(const j of neighbors8(N,i)) s.add(j);
-  s.delete(i); return [...s];
-}
-
-// find one deduction step. Returns {type, cells:[...], to:1|2, focus:[...], msg} or null
-// level: 1 basic, 2 + line confinement, 3 + one-step lookahead
-function findStep(N,reg,st,G,level,names){
-  const allGroups=[];
-  G.rows.forEach((g,k)=>allGroups.push({kind:'行',label:`${k+1}行目`,cells:g}));
-  G.cols.forEach((g,k)=>allGroups.push({kind:'列',label:`${k+1}列目`,cells:g}));
-  G.regs.forEach((g,k)=>allGroups.push({kind:'色',label:`${names[k]}エリア`,cells:g,reg:k}));
-  // 1. cat placed -> clear its attacks
-  for(let i=0;i<N*N;i++){
-    if(st[i]!==2) continue;
-    const t=attacks(N,reg,i).filter(j=>st[j]===0);
-    if(t.length) return {cells:t,to:1,focus:[i],msg:'置いた猫と同じ行・列・色エリア、それと周りの8マスには猫が入りません。×を付けましょう。'};
-  }
-  // 2. single candidate in a group
-  for(const g of allGroups){
-    if(g.cells.some(j=>st[j]===2)) continue;
-    const cand=g.cells.filter(j=>st[j]===0);
-    if(cand.length===1) return {cells:cand,to:2,focus:g.cells,msg:`${g.label}は猫を置ける場所が残り1マスだけです。`};
-  }
-  if(level<2) return null;
-  // 3. confinement: k regions whose candidates lie within k rows (or cols) -> clear others in those lines; and reverse
-  const open=(cells)=>cells.filter(j=>st[j]===0);
-  for(const dim of ['row','col']){
-    const lineOf=i=>dim==='row'?((i/N)|0):(i%N);
-    const lineName=dim==='row'?'行':'列';
-    const lines=dim==='row'?G.rows:G.cols;
-    // region -> set of lines (single-line and two-line cases)
-    for(let size=1;size<=2;size++){
-      const regLines=[];
-      for(let k=0;k<N;k++){
-        if(G.regs[k].some(j=>st[j]===2)) continue;
-        const ls=new Set(open(G.regs[k]).map(lineOf));
-        if(ls.size>0&&ls.size<=size) regLines.push([k,ls]);
-      }
-      // combos
-      const combos=[];
-      if(size===1) regLines.forEach(a=>combos.push([a]));
-      else for(let a=0;a<regLines.length;a++)for(let b=a+1;b<regLines.length;b++)combos.push([regLines[a],regLines[b]]);
-      for(const cb of combos){
-        const L=new Set(); cb.forEach(x=>x[1].forEach(l=>L.add(l)));
-        if(L.size!==size) continue;
-        const ks=new Set(cb.map(x=>x[0]));
-        const t=[]; L.forEach(l=>lines[l].forEach(j=>{if(st[j]===0&&!ks.has(reg[j]))t.push(j);}));
-        if(t.length){
-          const lab=[...L].sort((a,b)=>a-b).map(l=>`${l+1}${lineName}目`).join('と');
-          const rn=[...ks].map(k=>names[k]).join('と');
-          return {cells:t,to:1,focus:[...ks].flatMap(k=>G.regs[k]),msg:`${rn}エリアの猫は${lab}にしか入れません。だから${lab}の他の色のマスは×です。`};
-        }
-      }
-      // reverse: k lines whose candidates lie within k regions
-      const lineRegs=[];
-      for(let l=0;l<N;l++){
-        if(lines[l].some(j=>st[j]===2)) continue;
-        const rs=new Set(open(lines[l]).map(j=>reg[j]));
-        if(rs.size>0&&rs.size<=size) lineRegs.push([l,rs]);
-      }
-      const combos2=[];
-      if(size===1) lineRegs.forEach(a=>combos2.push([a]));
-      else for(let a=0;a<lineRegs.length;a++)for(let b=a+1;b<lineRegs.length;b++)combos2.push([lineRegs[a],lineRegs[b]]);
-      for(const cb of combos2){
-        const R=new Set(); cb.forEach(x=>x[1].forEach(k=>R.add(k)));
-        if(R.size!==size) continue;
-        const ls=new Set(cb.map(x=>x[0]));
-        const t=[]; R.forEach(k=>G.regs[k].forEach(j=>{if(st[j]===0&&!ls.has(lineOf(j)))t.push(j);}));
-        if(t.length){
-          const lab=[...ls].sort((a,b)=>a-b).map(l=>`${l+1}${lineName}目`).join('と');
-          const rn=[...R].map(k=>names[k]).join('と');
-          return {cells:t,to:1,focus:[...ls].flatMap(l=>lines[l]),msg:`${lab}の猫は${rn}エリアのどこかに入ります。だから${rn}エリアの、${lab}以外のマスは×です。`};
-        }
-      }
-    }
-  }
-  if(level<3) return null;
-  // 4. lookahead: placing cat at i empties some group
-  for(let i=0;i<N*N;i++){
-    if(st[i]!==0) continue;
-    const att=new Set(attacks(N,reg,i));
-    for(const g of allGroups){
-      if(g.cells.includes(i)) continue;
-      if(g.cells.some(j=>st[j]===2)) continue;
-      const cand=g.cells.filter(j=>st[j]===0);
-      if(cand.length&&cand.every(j=>att.has(j))){
-        return {cells:[i],to:1,focus:g.cells.concat([i]),msg:`もしこのマスに猫を置くと、${g.label}に猫を置ける場所がなくなってしまいます。だからここは×です。`};
-      }
-    }
-  }
-  return null;
-}
-
-function applyStep(st,step){ for(const j of step.cells) st[j]=step.to; }
-
-// solve logically; returns {solved, maxLevel}
-function logicSolve(N,reg,level){
-  const G=groups(N,reg), names=new Array(N).fill('');
-  const st=new Array(N*N).fill(0);
-  let maxUsed=1, steps=0;
-  while(true){
-    let step=null,used=0;
-    for(let l=1;l<=level;l++){step=findStep(N,reg,st,G,l,names); if(step){used=l;break;}}
-    if(!step) break;
-    // findStep at level l may return lower-level step; compute actual level
-    maxUsed=Math.max(maxUsed,used); steps++;
-    applyStep(st,step);
-  }
-  const cats=st.filter(v=>v===2).length;
-  return {solved:cats===N,maxUsed,steps};
-}
-
-// generate: unique + solvable with given max level; prefer puzzles that need exactly target level
-function generate(N,diff,timeBudget=1500){
-  const t0=Date.now(); let best=null,tries=0;
-  while(Date.now()-t0<timeBudget||!best){
-    tries++;
-    const cats=randomCats(N), reg=growRegions(N,cats);
-    if(!makeUnique(N,reg,cats)) continue;
-    const res=logicSolve(N,reg,diff);
-    if(!res.solved) continue;
-    const cand={N,reg,cats,level:res.maxUsed,tries};
-    if(res.maxUsed===diff) return cand;
-    if(!best||res.maxUsed>best.level) best=cand;
-  }
-  return best;
-}
-
-
-
-</script>
-<script>
-(function(){
-const NAMES=['ピンク','水色','黄色','緑','紫','オレンジ','青','茶色','グレー','赤'];
-const $=id=>document.getElementById(id);
-const boardEl=$('board');
-const LS='nekopatch-v1';
-
-// ---------- worker for generation ----------
-let worker=null, reqId=0; const pending={};
-try{
-  const src=$('core').textContent+`
-onmessage=e=>{const {id,N,diff}=e.data;const g=generate(N,diff,2500);postMessage({id,puzzle:{N:g.N,reg:g.reg,cats:g.cats,level:g.level}});};`;
-  worker=new Worker(URL.createObjectURL(new Blob([src],{type:'text/javascript'})));
-  worker.onmessage=e=>{const p=pending[e.data.id];delete pending[e.data.id];p&&p(e.data.puzzle);};
-}catch(err){worker=null;}
-function genAsync(N,diff){
-  return new Promise(res=>{
-    if(worker){const id=++reqId;pending[id]=res;worker.postMessage({id,N,diff});}
-    else setTimeout(()=>{const g=generate(N,diff,1500);res({N:g.N,reg:g.reg,cats:g.cats,level:g.level});},20);
-  });
-}
-const cache={};
-function prefetch(N,diff){const k=N+'-'+diff; if(!cache[k]) cache[k]=genAsync(N,diff);}
-function takePuzzle(N,diff){const k=N+'-'+diff; const p=cache[k]||genAsync(N,diff); delete cache[k]; return p;}
-
-// ---------- state ----------
-let P=null;          // {N,reg,cats,level,diff}
-let st=[];           // 0 empty,1 X,2 cat
-let undo=[],redo=[];
-let elapsed=0,startT=0,running=false,won=false;
-let solvedCount=0;
-let cellsEl=[];
-let pendingStep=null;
-let hints=0;
-const LSH='nekopatch-history-v1';
-const LV=['','かんたん','ふつう','むずかしい'];
-function loadHist(){try{return JSON.parse(localStorage.getItem(LSH)||'[]');}catch(e){return [];}}
-function saveHist(h){try{localStorage.setItem(LSH,JSON.stringify(h.slice(-500)));}catch(e){}}
-let history=loadHist();
-
-function save(){
-  try{localStorage.setItem(LS,JSON.stringify({P,st,elapsed:curElapsed(),won,solvedCount,hints,
-    autoX:$('autoX').checked,size:$('size').value,diff:$('diff').value}));}catch(e){}
-}
-function load(){try{return JSON.parse(localStorage.getItem(LS)||'null');}catch(e){return null;}}
-
-function curElapsed(){return elapsed+(running?Date.now()-startT:0);}
-function fmt(ms){const s=Math.floor(ms/1000);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');}
-setInterval(()=>{$('timer').textContent=fmt(curElapsed());},500);
-function startTimer(){if(!running&&!won){running=true;startT=Date.now();}}
-function stopTimer(){if(running){elapsed+=Date.now()-startT;running=false;}}
-document.addEventListener('visibilitychange',()=>{if(document.hidden){stopTimer();save();}else if(P&&!won)startTimer();});
-
-// ---------- render ----------
-function buildBoard(){
-  const N=P.N; boardEl.style.setProperty('--n',N); boardEl.innerHTML=''; cellsEl=[];
-  const E='var(--edge)', w=N>=9?2.5:3;
-  for(let i=0;i<N*N;i++){
-    const r=(i/N)|0,c=i%N,g=P.reg[i];
-    const d=document.createElement('div'); d.className='cell'; d.dataset.i=i;
-    d.setAttribute('role','gridcell');
-    d.style.background=`var(--r${g})`;
-    const sh=['inset 0 0 0 .5px rgba(0,0,0,.18)'];
-    if(r>0&&P.reg[i-N]!==g) sh.push(`inset 0 ${w}px 0 ${E}`);
-    if(r<N-1&&P.reg[i+N]!==g) sh.push(`inset 0 -${w}px 0 ${E}`);
-    if(c>0&&P.reg[i-1]!==g) sh.push(`inset ${w}px 0 0 ${E}`);
-    if(c<N-1&&P.reg[i+1]!==g) sh.push(`inset -${w}px 0 0 ${E}`);
-    d.style.boxShadow=sh.join(',');
-    boardEl.appendChild(d); cellsEl.push(d);
-  }
-}
-function conflicts(){
-  const N=P.N,bad=new Set(),cats=[];
-  for(let i=0;i<N*N;i++) if(st[i]===2) cats.push(i);
-  for(let a=0;a<cats.length;a++)for(let b=a+1;b<cats.length;b++){
-    const i=cats[a],j=cats[b],ri=(i/N)|0,ci=i%N,rj=(j/N)|0,cj=j%N;
-    if(ri===rj||ci===cj||P.reg[i]===P.reg[j]||(Math.abs(ri-rj)<=1&&Math.abs(ci-cj)<=1)){bad.add(i);bad.add(j);}
-  }
-  return {bad,count:cats.length};
-}
-function render(popSet){
-  const {bad,count}=conflicts();
-  for(let i=0;i<cellsEl.length;i++){
-    const d=cellsEl[i],v=st[i];
-    const want=v===2?'cat':v===1?'x':'';
-    if(d.dataset.v!==want){
-      d.dataset.v=want;
-      d.innerHTML=v===2?'<svg viewBox="0 0 100 100"><use href="#catIcon"/></svg>':v===1?'<svg viewBox="0 0 10 10"><use href="#xIcon"/></svg>':'';
-      d.classList.toggle('x',v===1);
-    }
-    d.classList.toggle('bad',bad.has(i));
-    d.classList.toggle('pop',!!(popSet&&popSet.has(i)&&v===2));
-    d.setAttribute('aria-label',`${(i/P.N|0)+1}行${i%P.N+1}列 ${NAMES[P.reg[i]]} ${v===2?'猫':v===1?'×':'空白'}`);
-  }
-  $('catCount').textContent=`${count}/${P.N}`;
-  $('undoBtn').disabled=!undo.length; $('redoBtn').disabled=!redo.length;
-  $('solved').textContent=solvedCount;
-  if(!won&&count===P.N&&bad.size===0) onWin();
-}
-function clearMarks(){cellsEl.forEach(d=>d.classList.remove('focus','target','wrong'));pendingStep=null;$('applyBtn').hidden=true;}
-function say(html){$('msgText').innerHTML=html;}
-
-// ---------- puzzle lifecycle ----------
-function setPuzzle(p,diff,keepState){
-  P={...p,diff}; won=false; $('win').hidden=true;
-  if(!keepState){st=new Array(P.N*P.N).fill(0);elapsed=0;hints=0;}
-  $('hintCount').textContent=hints;
-  undo=[];redo=[]; running=false;
-  buildBoard(); clearMarks(); render();
-  say('クリックで ×、もう一度で 猫、もう一度で 空白。<b>なぞると×を一気に</b>付けられます。');
-  if(!won) startTimer();
-  save();
-  prefetch(P.N,diff);
-}
-async function newPuzzle(){
-  const N=+$('size').value, diff=+$('diff').value;
-  stopTimer(); $('loading').hidden=false; $('win').hidden=true;
-  const p=await takePuzzle(N,diff);
-  $('loading').hidden=true;
-  setPuzzle(p,diff,false);
-}
-function onWin(){
-  won=true; stopTimer(); solvedCount++; clearMarks();
-  const lv=LV[P.diff];
-  const same=history.filter(h=>h.n===P.N&&h.d===P.diff);
-  const prev=same[same.length-1];
-  const rec={at:Date.now(),n:P.N,d:P.diff,t:elapsed,h:hints};
-  history.push(rec); saveHist(history);
-  $('winText').textContent=`${P.N}×${P.N}・${lv}　タイム ${fmt(elapsed)}　ヒント ${hints}回`;
-  const all=same.concat([rec]), avg=all.reduce((a,b)=>a+b.t,0)/all.length;
-  let cmp='';
-  if(prev){const diff=elapsed-prev.t;
-    cmp=diff<0?`前回より <span class="faster">${fmt(-diff)} 速い</span>`:diff>0?`前回より <span class="slower">${fmt(diff)} 遅い</span>`:'前回と同じタイム';
-    cmp+=`　平均 ${fmt(avg)}（${all.length}回）`;
-    if(same.every(h=>h.t>elapsed)) cmp='<b>自己ベスト！</b>　'+cmp;
-  }else cmp='この盤面・難しさで初めてのクリア！';
-  $('winCompare').innerHTML=cmp;
-  if(!$('recPanel').hidden) renderHist();
-  $('win').hidden=false; say('全部の猫が見つかりました！');
-  $('solved').textContent=solvedCount; save();
-}
-
-// ---------- editing ----------
-function pushUndo(before){undo.push(before);if(undo.length>300)undo.shift();redo=[];}
-function autoXAround(i,set){
-  if(!$('autoX').checked) return;
-  for(const j of attacks(P.N,P.reg,i)) if(st[j]===0){st[j]=1;}
-}
-let drag=null;
-function cellAt(x,y){const el=document.elementFromPoint(x,y);const c=el&&el.closest&&el.closest('.cell');return c&&boardEl.contains(c)?+c.dataset.i:-1;}
-boardEl.addEventListener('pointerdown',e=>{
-  if(won||!P||e.button>0) return;
-  const i=cellAt(e.clientX,e.clientY); if(i<0) return;
-  e.preventDefault(); boardEl.setPointerCapture(e.pointerId);
-  clearMarks(); startTimer();
-  const before=st.slice(), s=st[i];
-  drag={id:e.pointerId,start:i,last:i,before,mode:null,moved:false};
-  if(s===0){st[i]=1;drag.mode='paint';}
-  else if(s===1){drag.mode='pendX';}
-  else drag.mode='pendCat';
-  render();
-});
-function visit(i){
-  if(!drag||i<0||i===drag.last) return;
-  // fill straight-line gaps when pointer moves fast
-  const N=P.N,a=drag.last,ar=(a/N)|0,ac=a%N,br=(i/N)|0,bc=i%N;
-  const steps=Math.max(Math.abs(br-ar),Math.abs(bc-ac));
-  const path=[];
-  for(let k=1;k<=steps;k++){const r=Math.round(ar+(br-ar)*k/steps),c=Math.round(ac+(bc-ac)*k/steps);path.push(r*N+c);}
-  drag.last=i;
-  if(drag.mode==='pendX'){drag.mode='erase';st[drag.start]=0;}
-  else if(drag.mode==='pendCat'){drag.mode='paint';}
-  for(const j of path){
-    if(drag.mode==='paint'&&st[j]===0) st[j]=1;
-    else if(drag.mode==='erase'&&st[j]===1) st[j]=0;
-  }
-  render();
-}
-boardEl.addEventListener('pointermove',e=>{
-  if(!drag||e.pointerId!==drag.id) return;
-  const evs=e.getCoalescedEvents?e.getCoalescedEvents():[e];
-  for(const ev of (evs.length?evs:[e])) visit(cellAt(ev.clientX,ev.clientY));
-});
-function endDrag(e){
-  if(!drag||(e&&e.pointerId!==drag.id)) return;
-  const pop=new Set();
-  if(drag.mode==='pendX'){st[drag.start]=2;pop.add(drag.start);autoXAround(drag.start);}
-  else if(drag.mode==='pendCat'){st[drag.start]=0;}
-  if(st.some((v,k)=>v!==drag.before[k])) pushUndo(drag.before);
-  drag=null; render(pop); save();
-}
-boardEl.addEventListener('pointerup',endDrag);
-boardEl.addEventListener('pointercancel',endDrag);
-boardEl.addEventListener('contextmenu',e=>e.preventDefault());
-
-function doUndo(){if(!undo.length||won)return;redo.push(st.slice());st=undo.pop();clearMarks();render();save();}
-function doRedo(){if(!redo.length||won)return;undo.push(st.slice());st=redo.pop();clearMarks();render();save();}
-$('undoBtn').onclick=doUndo; $('redoBtn').onclick=doRedo;
-$('clearXBtn').onclick=()=>{if(won)return;const b=st.slice();st=st.map(v=>v===1?0:v);if(st.some((v,k)=>v!==b[k]))pushUndo(b);clearMarks();render();save();};
-let resetArmed=0;
-$('resetBtn').onclick=()=>{
-  if(won) return;
-  if(Date.now()-resetArmed>3000){resetArmed=Date.now();say('もう一度「最初から」を押すと、盤面を全部消します。');return;}
-  resetArmed=0;const b=st.slice();st=st.map(()=>0);pushUndo(b);clearMarks();render();save();say('盤面を消しました。「戻す」で元に戻せます。');
-};
-$('newBtn').onclick=newPuzzle; $('winNext').onclick=newPuzzle;
-$('size').onchange=()=>{prefetch(+$('size').value,+$('diff').value);newPuzzle();};
-$('diff').onchange=()=>{prefetch(+$('size').value,+$('diff').value);newPuzzle();};
-$('autoX').onchange=save;
-
-// ---------- history ----------
-function renderHist(){
-  const groups={};
-  history.forEach(h=>{const k=h.n+'-'+h.d;(groups[k]=groups[k]||[]).push(h);});
-  const keys=Object.keys(groups).sort((a,b)=>{const[an,ad]=a.split('-').map(Number),[bn,bd]=b.split('-').map(Number);return an-bn||ad-bd;});
-  const curK=(+$('size').value)+'-'+(+$('diff').value);
-  if(!keys.length){$('recSummary').innerHTML='<p class="empty">まだ記録がありません。1問クリアするとここに出ます。</p>';$('recList').innerHTML='';return;}
-  let t='<table><thead><tr><th>盤面・難しさ</th><th>回数</th><th>平均</th><th>ベスト</th><th>前回</th><th>平均ヒント</th></tr></thead><tbody>';
-  for(const k of keys){const g=groups[k],[n,d]=k.split('-').map(Number);
-    const avg=g.reduce((a,b)=>a+b.t,0)/g.length, best=Math.min(...g.map(x=>x.t)), last=g[g.length-1];
-    const ah=(g.reduce((a,b)=>a+b.h,0)/g.length).toFixed(1);
-    t+=`<tr class="${k===curK?'cur':''}"><td>${n}×${n} ${LV[d]}</td><td>${g.length}</td><td>${fmt(avg)}</td><td>${fmt(best)}</td><td>${fmt(last.t)}</td><td>${ah}</td></tr>`;}
-  $('recSummary').innerHTML=t+'</tbody></table>';
-  // recent list with comparison to previous same-category
-  const rows=[];
-  history.forEach((h,i)=>{let prev=null;for(let j=i-1;j>=0;j--){if(history[j].n===h.n&&history[j].d===h.d){prev=history[j];break;}}rows.push({h,prev});});
-  let l='<table><thead><tr><th>日時</th><th>盤面・難しさ</th><th>タイム</th><th>前回比</th><th>ヒント</th></tr></thead><tbody>';
-  for(const {h,prev} of rows.slice(-30).reverse()){
-    const dt=new Date(h.at),ds=`${dt.getMonth()+1}/${dt.getDate()} ${dt.getHours()}:${String(dt.getMinutes()).padStart(2,'0')}`;
-    let c='—';if(prev){const df=h.t-prev.t;c=df<0?`<span class="faster">−${fmt(-df)}</span>`:df>0?`<span class="slower">+${fmt(df)}</span>`:'±0:00';}
-    l+=`<tr><td>${ds}</td><td>${h.n}×${h.n} ${LV[h.d]}</td><td>${fmt(h.t)}</td><td>${c}</td><td>${h.h}</td></tr>`;}
-  $('recList').innerHTML=l+'</tbody></table>';
-}
-$('recBtn').onclick=()=>{const p=$('recPanel');p.hidden=!p.hidden;if(!p.hidden){renderHist();p.scrollIntoView({behavior:'smooth',block:'start'});}};
-$('recClose').onclick=()=>{$('recPanel').hidden=true;};
-let clearArmed=0;
-$('recClear').onclick=()=>{
-  if(Date.now()-clearArmed>3000){clearArmed=Date.now();$('recClear').textContent='もう一度押すと消します';setTimeout(()=>{$('recClear').textContent='記録を全部消す';},3000);return;}
-  clearArmed=0;history=[];saveHist(history);$('recClear').textContent='記録を全部消す';renderHist();
-};
-
-// ---------- hint ----------
-$('hintBtn').onclick=()=>{
-  if(!P||won) return;
-  clearMarks();
-  hints++; $('hintCount').textContent=hints; save();
-  const N=P.N, sol=new Set(P.cats.map((c,r)=>r*N+c));
-  const wrong=[];
-  for(let i=0;i<N*N;i++){if(st[i]===2&&!sol.has(i))wrong.push(i);if(st[i]===1&&sol.has(i))wrong.push(i);}
-  if(wrong.length){wrong.forEach(i=>cellsEl[i].classList.add('wrong'));
-    say(`赤くゆれているマスが間違っています（${wrong.length}か所）。`);return;}
-  const G=groups(N,P.reg);
-  let step=null;
-  for(let l=1;l<=3&&!step;l++) step=findStep(N,P.reg,st,G,l,NAMES);
-  if(!step){ // reveal a cat
-    const i=[...sol].find(j=>st[j]!==2);
-    cellsEl[i].classList.add('target'); say('ここに猫がいます。');
-    pendingStep={cells:[i],to:2}; $('applyBtn').textContent='猫を置く'; $('applyBtn').hidden=false; return;
-  }
-  step.focus.forEach(i=>cellsEl[i].classList.add('focus'));
-  step.cells.forEach(i=>cellsEl[i].classList.add('target'));
-  say(step.msg);
-  pendingStep=step; $('applyBtn').textContent=step.to===2?'猫を置く':'この×を付ける'; $('applyBtn').hidden=false;
-};
-$('applyBtn').onclick=()=>{
-  if(!pendingStep) return;
-  const b=st.slice(),pop=new Set();
-  pendingStep.cells.forEach(i=>{st[i]=pendingStep.to;if(pendingStep.to===2){pop.add(i);autoXAround(i);}});
-  pushUndo(b); clearMarks(); render(pop); save();
-};
-
-document.addEventListener('keydown',e=>{
-  if(e.target.tagName==='SELECT') return;
-  const k=e.key.toLowerCase();
-  if((e.ctrlKey||e.metaKey)&&k==='z'){e.preventDefault();e.shiftKey?doRedo():doUndo();}
-  else if((e.ctrlKey||e.metaKey)&&k==='y'){e.preventDefault();doRedo();}
-  else if(!e.ctrlKey&&!e.metaKey&&k==='n'){newPuzzle();}
-  else if(!e.ctrlKey&&!e.metaKey&&k==='h'){$('hintBtn').click();}
-});
-
-// ---------- boot ----------
-const saved=load();
-if(saved){$('autoX').checked=!!saved.autoX; if(saved.size)$('size').value=saved.size; if(saved.diff)$('diff').value=saved.diff; solvedCount=saved.solvedCount||0;}
-if(saved&&saved.P&&saved.st&&!saved.won){
-  st=saved.st; elapsed=saved.elapsed||0; hints=saved.hints||0; setPuzzle(saved.P,saved.P.diff,true);
-}else newPuzzle();
-})();
-</script>
 
 </body>
 </html>
