@@ -1,7 +1,7 @@
 ---
 title: GitHub Pages でそのまま配信し、検査の仕組みは置かない
 category: 運用
-status: 採用
+status: 置き換え（→ ecf8）
 review: 未確認
 date: 2026-10-21
 ---
