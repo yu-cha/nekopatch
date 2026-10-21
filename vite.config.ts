@@ -44,5 +44,7 @@ export default defineConfig(({ mode }) => ({
   plugins: [webManifest(mode === "trial")],
   test: {
     include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
+    // ほかのセッションの作業でマシンが混んでいると、問題作りや git を使うテストが 5 秒（既定）を超える
+    testTimeout: 30000,
   },
 }));
