@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && echo '進行中の OpenSpec の変更提案（openspec list）:' && nix develop --command openspec list 2>/dev/null"
+          }
+        ]
+      }
+    ]
+  }
+}

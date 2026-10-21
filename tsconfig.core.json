@@ -1,0 +1,10 @@
+{
+  "//": "ロジック（src/core）だけの型検査。DOM と Node.js の型を外し、ブラウザや Node.js に依存しないことを確かめる（~/git/knowledge/decisions/2026-10-17-203216-798a-ts-web-stack.md）",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": []
+  },
+  "include": ["src/core"],
+  "exclude": ["src/core/**/*.test.ts"]
+}

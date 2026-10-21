@@ -1,0 +1,33 @@
+schema: spec-driven
+
+context: |
+  Language: Japanese
+  All artifacts must be written in Japanese.
+  Keep OpenSpec structural headings and SHALL/MUST keywords in English.
+
+  ねこパッチ。猫を置くパズルのゲーム（行・列・色のエリアに猫 1 匹、猫どうしは隣り合わない）。ナンが Android のスマホの Chrome で遊ぶ。クリアの記録はスマホの Chrome の中（localStorage）だけに残し、ネットに送らない。公開のページ（GitHub Pages）なので、ナン以外の人も遊べる。
+  使うのはナン（開発の知識が無い）。要件の背景と合意内容は openspec/specs/ に、技術判断の理由は decisions/ に置く。
+  技術: TypeScript、Vite、フレームワーク無し。ロジックは src/core、UI は src/ui/<種類>（~/git/knowledge/decisions/2026-10-17-203216-798a-ts-web-stack.md）。
+  検査は `just check`（Biome、tsc、依存の向き、Vitest、openspec validate、シナリオとテストの対応の確認）。
+
+rules:
+  proposal:
+    - 「作らないもの」（範囲外）を必ず明記する
+    - ナンとの合意内容を、ナンにも読める言葉で書く。専門用語には短い説明を添える
+  specs:
+    - 各シナリオには、名前が完全に一致する自動テスト（Vitest の `it("<シナリオ名>", ...)`）を用意する。`just check` が対応を検査する（tasks.md に未完了がある間は警告、すべて完了したら失敗）
+    - シナリオ名は、リポジトリ全体で重複させない
+    - 具体的な入力と出力の例を GIVEN / WHEN / THEN に書く
+  design:
+    - 重要な技術判断は decisions/ に記録し（adr new）、ID で参照する
+  tasks:
+    - 最後のタスクは「`just check` が通ることを確かめる」にする
+
+operations:
+  apply:
+    guidance:
+      - シナリオごとのテストを先に書き、`nix develop -c just check` を通す
+  archive:
+    guidance:
+      - ナンに動作を確かめてもらい、了承を得てからアーカイブする
+      - アーカイブして main に取り込んだら、`nix develop -c just deploy` で本物を配信する
