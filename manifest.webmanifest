@@ -1,6 +1,6 @@
 {
-  "name": "ねこパッチ（確かめ用）",
-  "short_name": "ねこパッチ（確かめ用）",
+  "name": "ねこパッチ",
+  "short_name": "ねこパッチ",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
