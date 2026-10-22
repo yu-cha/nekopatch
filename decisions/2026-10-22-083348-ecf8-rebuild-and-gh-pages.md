@@ -48,7 +48,7 @@ date: 2026-10-22
 ## 影響・見直す条件
 
 - `main` は、もう配信されない。配信は `gh-pages` から。`main` に取り込んだら、`nix develop -c just deploy` を実行する（リポジトリの CLAUDE.md）。
-- 公開元を `main` から `gh-pages` に切り替えた（2026-10-22、`gh api -X PUT repos/yu-cha/nekopatch/pages`）。切り替えの前に、`gh-pages` の最上位に、それまで配信していた `index.html` と `.nojekyll` をそのまま置いた。
+- 公開元を `main` から `gh-pages` に切り替えた（2026-10-22、`gh api -X PUT repos/yu-cha/nekopatch/pages`）。切り替えの前に、`gh-pages` の最上位に、それまで配信していた `index.html` と `.nojekyll` をそのまま置いた。切り替えただけでは配信が作り直されなかったので、`gh api -X POST repos/yu-cha/nekopatch/pages/builds` で作り直しを頼んだ。配信の中身は、切り替えの前後で同じだった（sha256 で確かめた）。
 - 本物と確かめ用は、同じオリジン（`yu-cha.github.io`）の保存領域を共有する。確かめ用のキーの決まりは ff86。
 - `just deploy` を忘れることが続いたら、`wt land` の後に自動で配信する仕組みを検討する。
 - 先生が GitHub Actions を許したら、`main` への push で配信する形を検討する。
