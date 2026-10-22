@@ -64,3 +64,27 @@ describe("配信の木", () => {
     });
   });
 });
+
+describe("git の呼び方", () => {
+  it("git のフックの中（GIT_DIR が設定されている）でも、ほかのリポジトリを書き換えない", () => {
+    // フックのリポジトリの役
+    const hookRepo = mkdtempSync(join(tmpdir(), "nekopatch-hook-repo-"));
+    const saved = { GIT_DIR: process.env.GIT_DIR, GIT_INDEX_FILE: process.env.GIT_INDEX_FILE };
+    try {
+      gitIn(hookRepo)(["init", "--quiet"]);
+      process.env.GIT_DIR = join(hookRepo, ".git");
+      process.env.GIT_INDEX_FILE = join(hookRepo, ".git", "index");
+
+      const other = mkdtempSync(join(dir, "other-"));
+      gitIn(other)(["init", "--quiet"]);
+      expect(gitIn(other)(["rev-parse", "--absolute-git-dir"])).toBe(join(other, ".git"));
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+    expect(gitIn(hookRepo)(["config", "--get", "core.bare"])).toBe("false");
+    rmSync(hookRepo, { recursive: true, force: true });
+  });
+});

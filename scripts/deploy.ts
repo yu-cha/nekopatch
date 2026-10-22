@@ -17,16 +17,26 @@ export const TRIAL_DIR = "preview";
 
 export type Git = (args: string[], options?: { index?: string; input?: Buffer }) => string;
 
+/**
+ * git の場所や索引を指す環境変数（GIT_DIR、GIT_WORK_TREE、GIT_INDEX_FILE など）を除いた環境。
+ * git のフック（コミット前の検査）の中では、git がこれらを設定して渡してくる。そのまま受け継ぐと、
+ * cwd ではなくフックのリポジトリを操作してしまう（2026-10-22、テストの git init が本物のリポジトリを
+ * 作業ツリーの無い設定 core.bare = true に書き換えた）
+ */
+export function cleanGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !name.startsWith("GIT_")));
+}
+
 export function gitIn(cwd: string): Git {
   return (args, options = {}) =>
     execFileSync("git", args, {
       cwd,
       encoding: "utf8",
       input: options.input,
-      env:
-        options.index === undefined
-          ? process.env
-          : { ...process.env, GIT_INDEX_FILE: options.index },
+      env: {
+        ...cleanGitEnv(process.env),
+        ...(options.index === undefined ? {} : { GIT_INDEX_FILE: options.index }),
+      },
       stdio: ["pipe", "pipe", "inherit"],
     }).trim();
 }
@@ -58,6 +68,7 @@ function build(git: Git, commit: string, mode: "main" | "trial", scratch: string
   const src = join(scratch, "src");
   execFileSync("mkdir", ["-p", src]);
   const archive = execFileSync("git", ["archive", "--format=tar", commit], {
+    env: cleanGitEnv(process.env),
     cwd: git(["rev-parse", "--show-toplevel"]),
     maxBuffer: 1 << 30,
   });
@@ -106,6 +117,7 @@ function main(): void {
     });
     git(["update-ref", `refs/heads/${PAGES_BRANCH}`, pagesCommit]);
     execFileSync("git", ["push", "origin", `${PAGES_BRANCH}:${PAGES_BRANCH}`], {
+      env: cleanGitEnv(process.env),
       stdio: ["ignore", "inherit", "inherit"],
     });
     console.log(
