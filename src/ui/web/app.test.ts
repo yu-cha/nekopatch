@@ -33,6 +33,8 @@ interface Harness {
   readonly downloads: { fileName: string; text: string }[];
   readonly persistCalls: () => number;
   readonly clock: { now: number };
+  /** ほかのタブが保存データを書き換えたことを、このタブに知らせる（storage の出来事） */
+  readonly notifyOtherTab: () => void;
 }
 
 interface Options {
@@ -52,6 +54,7 @@ async function start(options: Options = {}): Promise<Harness> {
   let calls = 0;
   const persist = options.persist ?? { persisted: false, grant: true };
   let granted = persist !== "none" && persist.persisted;
+  let storageListener = () => {};
   const env: AppEnv = {
     store: options.trial
       ? new SaveStore(trialStorage(kv), TRIAL_KEYS, now)
@@ -72,12 +75,22 @@ async function start(options: Options = {}): Promise<Harness> {
     download: (fileName, t) => {
       downloads.push({ fileName, text: t });
     },
+    onStorageChange: (listener) => {
+      storageListener = listener;
+    },
     now,
   };
   const app = startApp(document, env);
   running.push(app);
   await app.whenIdle();
-  return { app, kv, downloads, persistCalls: () => calls, clock };
+  return {
+    app,
+    kv,
+    downloads,
+    persistCalls: () => calls,
+    clock,
+    notifyOtherTab: () => storageListener(),
+  };
 }
 
 /** 作り直す前の版が保存した形の記録 */
@@ -224,6 +237,48 @@ describe("今までの記録を引き継ぐ", () => {
     expect(text("catCount")).toBe("1/6");
     expect(text("solved")).toBe("7");
     expect(($("size") as HTMLSelectElement).value).toBe("6");
+  });
+});
+
+describe("ほかのタブで増えた記録を消さない", () => {
+  /** ほかのタブが 1 問クリアして保存した、という状態にする（ほかのタブの盤面は保存しない） */
+  function otherTabClears(kv: MemoryStorage, solvedCount: number): void {
+    kv.setItem(MAIN_KEYS.history, oldHistory([...storedRecords(kv), C]));
+    kv.setItem(MAIN_KEYS.game, oldGame({ solvedCount }));
+  }
+
+  it("別のタブでクリアした記録を、上書きで消さない", async () => {
+    const kv = threeRecords();
+    await start({ kv });
+    // このタブがまだ知らないうちに、ほかのタブが 1 問クリアする（storage の出来事は届いていない）
+    otherTabClears(kv, 813);
+    solveWithHints();
+
+    const saved = storedRecords(kv);
+    expect(saved).toHaveLength(5);
+    expect(saved.slice(0, 4)).toEqual([A, A2, B, C]);
+    expect(text("solved")).toBe("814");
+    expect(JSON.parse(kv.getItem(MAIN_KEYS.game) ?? "").solvedCount).toBe(814);
+  });
+
+  it("別のタブで増えた記録を、開いている記録の画面に出す", async () => {
+    const kv = threeRecords();
+    const h = await start({ kv });
+    click("recBtn");
+    expect(document.querySelectorAll("#recList tbody tr")).toHaveLength(3);
+
+    otherTabClears(kv, 813);
+    h.notifyOtherTab();
+    expect(document.querySelectorAll("#recList tbody tr")).toHaveLength(4);
+    expect(text("solved")).toBe("813");
+  });
+
+  it("ほかのタブのクリアの数が多ければ、遊びかけの保存で小さい数に戻さない", async () => {
+    const kv = threeRecords();
+    await start({ kv });
+    otherTabClears(kv, 813);
+    click("clearXBtn"); // 盤面を保存する操作
+    expect(JSON.parse(kv.getItem(MAIN_KEYS.game) ?? "").solvedCount).toBe(813);
   });
 });
 

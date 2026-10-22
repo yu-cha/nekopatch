@@ -26,6 +26,16 @@ export function createBrowserEnv(win: Window, trial: boolean): AppEnv {
       a.remove();
       win.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     },
+    onStorageChange(listener, signal) {
+      // 同じオリジンのほかのタブが localStorage を書き換えたときに届く（自分のタブの書き換えでは届かない）
+      win.addEventListener(
+        "storage",
+        (e) => {
+          if (e.key === null || e.key.startsWith("nekopatch-")) listener();
+        },
+        { signal },
+      );
+    },
     now,
   };
 }

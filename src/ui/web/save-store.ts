@@ -101,6 +101,11 @@ export class SaveStore {
     return game;
   }
 
+  /** 保存してある「クリア ○ 問」の数。読めなければ 0。読めない値を残し直したりはしない */
+  storedSolvedCount(): number {
+    return parseSavedGame(this.read(this.keys.game)).game?.solvedCount ?? 0;
+  }
+
   saveGame(state: GameState): boolean {
     return this.write(this.keys.game, serializeGame(state));
   }
@@ -126,7 +131,11 @@ export class SaveStore {
   /** 読めない値を、消さずに別のキー（<キー>-unreadable-<日時>）に残す */
   private keepUnreadable(key: string, raw: string): boolean {
     this.unreadableFound = true;
-    if (this.write(`${key}-unreadable-${this.now()}`, raw)) return true;
+    if (this.write(`${key}-unreadable-${this.now()}`, raw)) {
+      // 前に残せなかったキーでも、残せたら書き直してよい
+      this.locked.delete(key);
+      return true;
+    }
     this.locked.add(key);
     return false;
   }

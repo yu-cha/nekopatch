@@ -38,6 +38,8 @@ export interface AppEnv {
   readonly persistApi: PersistApi | undefined;
   /** 文字をファイルにして、端末に保存させる */
   download(fileName: string, text: string): void;
+  /** ほかのタブ（ホーム画面のアプリを含む）が保存データを書き換えたら、listener を呼ぶ */
+  onStorageChange(listener: () => void, signal: AbortSignal): void;
   now(): number;
 }
 
@@ -120,7 +122,18 @@ export function startApp(doc: Document, env: AppEnv): App {
     $("recSaveError").hidden = !saveFailed;
   }
 
+  /**
+   * ほかのタブで増えた記録とクリアの数を取り込む。同じゲームを 2 つのタブで開いていても、
+   * 片方の古い写しで、もう片方の記録を上書きしないため（記録は保存してあるものが一番新しい）
+   */
+  function syncFromStore(): void {
+    records = env.store.loadRecords();
+    solvedCount = Math.max(solvedCount, env.store.storedSolvedCount());
+    $("solved").textContent = String(solvedCount);
+  }
+
   function save(): void {
+    solvedCount = Math.max(solvedCount, env.store.storedSolvedCount());
     markSaved(
       env.store.saveGame({
         puzzle: P,
@@ -272,6 +285,7 @@ export function startApp(doc: Document, env: AppEnv): App {
   function onWin(p: PlayingPuzzle): void {
     won = true;
     stopTimer();
+    syncFromStore();
     solvedCount++;
     clearMarks();
     const lv = LEVEL_NAMES[p.diff] ?? "";
@@ -537,6 +551,7 @@ export function startApp(doc: Document, env: AppEnv): App {
     el.hidden = false;
   }
   $("recExport").onclick = () => {
+    syncFromStore();
     const now = new Date(env.now());
     env.download(exportFileName(now), exportText({ solvedCount, records }, now));
   };
@@ -558,6 +573,7 @@ export function startApp(doc: Document, env: AppEnv): App {
       showImportMessage(IMPORT_MESSAGES.unreadable);
       return;
     }
+    syncFromStore();
     const { data: merged, added } = importRecords({ solvedCount, records }, data);
     const next = [...merged.records];
     if (!env.store.saveRecords(next)) {
@@ -657,6 +673,10 @@ export function startApp(doc: Document, env: AppEnv): App {
   } else newPuzzle();
   renderKeep();
   checkPersist();
+  env.onStorageChange(() => {
+    syncFromStore();
+    if (!recPanel.hidden) renderHist();
+  }, stopped.signal);
 
   return {
     async whenIdle() {
