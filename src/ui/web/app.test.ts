@@ -2,8 +2,17 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type ClearRecord, generate, type Puzzle, solutionCells } from "../../core/index.ts";
-import { type App, type AppEnv, IMPORT_MESSAGES, startApp } from "./app.ts";
+import {
+  boardId,
+  type ClearRecord,
+  encodeBoard,
+  generate,
+  type Puzzle,
+  REGION_NAMES,
+  recordKey,
+  solutionCells,
+} from "../../core/index.ts";
+import { type App, type AppEnv, IMPORT_MESSAGES, PLAY_MESSAGES, startApp } from "./app.ts";
 import { persistMessage } from "./persistence.ts";
 import { MAIN_KEYS, SaveStore, TRIAL_KEYS, trialStorage } from "./save-store.ts";
 import { MemoryStorage, seededRandom } from "./test-support.ts";
@@ -22,9 +31,9 @@ const click = (id: string) => $(id).click();
 /** 2026-10-22 10:00（日本の時刻で書き出しのファイル名が決まるよう、その土地の時刻で作る） */
 const TODAY = new Date(2026, 9, 22, 10, 0).getTime();
 
-/** 盤面の大きさと難しさごとに、決まった問題 */
-function fixedPuzzle(N: number, diff: number): Puzzle {
-  return generate(N, diff, 0, seededRandom(N * 10 + diff));
+/** 盤面の大きさと難しさごとに、決まった問題。k を変えると別の盤面になる */
+function fixedPuzzle(N: number, diff: number, k = 0): Puzzle {
+  return generate(N, diff, 0, seededRandom(N * 10 + diff + k * 1000));
 }
 
 interface Harness {
@@ -55,12 +64,14 @@ async function start(options: Options = {}): Promise<Harness> {
   const persist = options.persist ?? { persisted: false, grant: true };
   let granted = persist !== "none" && persist.persisted;
   let storageListener = () => {};
+  // 問題を作るたびに別の盤面にする（同じ盤面ばかりだと、もう一度遊んだ記録になる）
+  let made = 0;
   const env: AppEnv = {
     store: options.trial
       ? new SaveStore(trialStorage(kv), TRIAL_KEYS, now)
       : new SaveStore(kv, MAIN_KEYS, now),
     trial: options.trial ?? false,
-    generate: async (N, diff) => fixedPuzzle(N, diff),
+    generate: async (N, diff) => fixedPuzzle(N, diff, made++),
     persistApi:
       persist === "none"
         ? undefined
@@ -160,6 +171,7 @@ function resetPage(): void {
   document.body.innerHTML = body;
   ($("size") as HTMLSelectElement).value = "8";
   ($("diff") as HTMLSelectElement).value = "2";
+  ($("recSort") as HTMLSelectElement).value = "new";
 }
 
 beforeEach(resetPage);
@@ -503,11 +515,12 @@ describe("確かめ用のページ", () => {
     click("recClear");
     expect(storedRecords(kv, TRIAL_KEYS.history)).toEqual([]);
 
-    for (const key of [MAIN_KEYS.history, MAIN_KEYS.game])
-      expect(kv.getItem(key)).toBe(before.get(key));
+    for (const key of [MAIN_KEYS.history, MAIN_KEYS.game, MAIN_KEYS.boards])
+      expect(kv.getItem(key)).toBe(before.get(key) ?? null);
     expect(kv.keysStartingWith("nekopatch-").filter((k) => !before.has(k))).toEqual([
       TRIAL_KEYS.game,
       TRIAL_KEYS.history,
+      TRIAL_KEYS.boards,
     ]);
     expect(() => trialStorage(kv).setItem(MAIN_KEYS.history, "[]")).toThrow();
   });
@@ -524,5 +537,568 @@ describe("確かめ用のページ", () => {
     resetPage();
     await start();
     expect($("trialNote").hidden).toBe(true);
+  });
+});
+
+// ---------- 同じ盤面をもう一度遊ぶ（replay-board） ----------
+
+/** 前に遊んだ盤面（8×8・ふつう） */
+const PA = fixedPuzzle(8, 2, 100);
+const PB = fixedPuzzle(8, 2, 200);
+const PC = fixedPuzzle(8, 2, 300);
+const codeOf = (p: Puzzle) => encodeBoard(p.N, p.reg);
+
+/** i 分目にクリアした 8×8・ふつう（ほかの大きさ・難しさも指定できる）の記録 */
+function play(i: number, t: number, h = 0, n = 8, d = 2): ClearRecord {
+  return { at: 1761300000000 + i * 60000, n, d, t, h };
+}
+
+/** 記録と、その盤面の形（盤面の形が無い記録は null）を保存した状態 */
+function withBoards(
+  entries: [ClearRecord, Puzzle | null][],
+  extra: Record<string, string> = {},
+): MemoryStorage {
+  const boards: Record<string, string> = {};
+  for (const [r, p] of entries) if (p !== null) boards[recordKey(r)] = codeOf(p);
+  return new MemoryStorage({
+    [MAIN_KEYS.history]: oldHistory(entries.map(([r]) => r)),
+    [MAIN_KEYS.boards]: JSON.stringify(boards),
+    ...extra,
+  });
+}
+
+/** 一覧の行（セルの文字） */
+function listRows(): string[][] {
+  return [...document.querySelectorAll("#recList tbody tr")].map((tr) =>
+    [...tr.querySelectorAll("td")].map((td) => td.textContent ?? ""),
+  );
+}
+/** 一覧の行の盤面 ID */
+function listIds(): string[] {
+  return [...document.querySelectorAll("#recList tbody tr")].map(
+    (tr) => tr.querySelector(".bid")?.textContent ?? "",
+  );
+}
+function playButtons(): HTMLButtonElement[] {
+  return [...document.querySelectorAll<HTMLButtonElement>("#recList button.play")];
+}
+/** 一覧で、盤面 ID が id の最初の行の「遊ぶ」を押す */
+function clickPlay(id: string): void {
+  const row = [...document.querySelectorAll("#recList tbody tr")].find(
+    (tr) => tr.querySelector(".bid")?.textContent === id,
+  );
+  const btn = row?.querySelector<HTMLButtonElement>("button.play");
+  if (btn === null || btn === undefined) throw new Error(`${id} の「遊ぶ」がありません`);
+  btn.click();
+}
+const idOf = (p: Puzzle) => boardId(p.N, codeOf(p));
+
+/** 盤面のマスごとの色のエリアの番号（読み上げの名前から） */
+function boardRegions(): number[] {
+  return [...document.querySelectorAll<HTMLElement>("#board .cell")].map((c) =>
+    REGION_NAMES.indexOf(c.getAttribute("aria-label")?.split(" ")[1] ?? ""),
+  );
+}
+/** 盤面のマスごとの状態（"" は空白、"x"、"cat"） */
+function boardMarks(): string[] {
+  return [...document.querySelectorAll<HTMLElement>("#board .cell")].map((c) => c.dataset.v ?? "");
+}
+
+function choose(id: string, value: string): void {
+  const el = $(id) as HTMLSelectElement;
+  el.value = value;
+  el.dispatchEvent(new Event("change"));
+}
+
+function storedBoards(kv: MemoryStorage, key = MAIN_KEYS.boards): Record<string, string> {
+  return JSON.parse(kv.getItem(key) ?? "{}");
+}
+
+/** ms かけて、今の盤面を解く */
+function solveTaking(h: Harness, ms: number): void {
+  h.clock.now += ms;
+  solveWithHints();
+  expect($("win").hidden).toBe(false);
+}
+
+describe("遊んだ盤面の形を残す", () => {
+  it("クリアした盤面の形を、記録とは別のキーに残す", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    solveTaking(h, 65000);
+    const saved = storedRecords(kv);
+    expect(saved).toHaveLength(1);
+    const [rec] = saved;
+    if (rec === undefined) throw new Error("記録がありません");
+    expect(Object.keys(rec)).toEqual(["at", "n", "d", "t", "h"]);
+    expect(rec).toMatchObject({ n: 8, d: 2, t: 65000 });
+    // 最初の問題は、偽物の問題作りの 1 問目
+    expect(storedBoards(kv)).toEqual({ [recordKey(rec)]: codeOf(fixedPuzzle(8, 2, 0)) });
+  });
+
+  it("盤面を知らない版が記録を保存し直しても、盤面の形は残る", async () => {
+    const a1 = play(0, 300000);
+    const kv = withBoards([[a1, PA]]);
+    const boards = kv.getItem(MAIN_KEYS.boards);
+    // 今配信している版は、5 つの値だけの形で記録を保存し直す
+    kv.setItem(MAIN_KEYS.history, oldHistory([a1, play(1, 200000)]));
+    await start({ kv });
+    expect(kv.getItem(MAIN_KEYS.boards)).toBe(boards);
+    click("recBtn");
+    expect(listIds()).toEqual(["—", idOf(PA)]);
+    expect(playButtons()).toHaveLength(1);
+  });
+});
+
+describe("盤面 ID で盤面を見分ける", () => {
+  it("同じ盤面には、いつも同じ盤面 ID がつく", async () => {
+    await start({
+      kv: withBoards([
+        [play(0, 300000), PA],
+        [play(1, 180000), PB],
+        [play(2, 90000), PA],
+      ]),
+    });
+    click("recBtn");
+    const ids = listIds();
+    expect(ids).toHaveLength(3);
+    expect(ids[0]).toBe(ids[2]);
+    expect(ids[1]).not.toBe(ids[0]);
+    for (const id of ids) expect(id).toMatch(/^[0-9A-HJKMNP-TV-Z]{5}$/);
+  });
+
+  it("盤面の形が無い記録には、遊ぶが出ない", async () => {
+    await start({
+      kv: withBoards([
+        [play(0, 200000), null],
+        [play(1, 300000), PA],
+      ]),
+    });
+    click("recBtn");
+    expect(listIds()).toEqual([idOf(PA), "—"]);
+    const rows = [...document.querySelectorAll("#recList tbody tr")];
+    expect(rows.map((tr) => tr.querySelector("button.play") !== null)).toEqual([true, false]);
+  });
+});
+
+describe("記録の一覧から同じ盤面を遊ぶ", () => {
+  it("記録の一覧の遊ぶで、同じ盤面を最初から遊べる", async () => {
+    const h = await start({ kv: withBoards([[play(0, 300000), PA]]) });
+    choose("size", "6");
+    choose("diff", "1");
+    await h.app.whenIdle();
+    solveTaking(h, 30000);
+    expect(text("hintCount")).not.toBe("0");
+
+    click("recBtn");
+    clickPlay(idOf(PA));
+    expect(boardRegions()).toEqual(PA.reg);
+    expect(boardMarks().every((v) => v === "")).toBe(true);
+    expect($("win").hidden).toBe(true);
+    expect(text("timer")).toBe("0:00");
+    expect(text("hintCount")).toBe("0");
+    expect(($("size") as HTMLSelectElement).value).toBe("8");
+    expect(($("diff") as HTMLSelectElement).value).toBe("2");
+  });
+
+  it("遊んでいる途中なら、もう一度押してから始める", async () => {
+    await start({ kv: withBoards([[play(0, 300000), PA]]) });
+    // ヒントの 1 手を付けて、遊んでいる途中にする
+    click("hintBtn");
+    click("applyBtn");
+    const marks = boardMarks();
+    const regions = boardRegions();
+    expect(marks.some((v) => v !== "")).toBe(true);
+
+    click("recBtn");
+    clickPlay(idOf(PA));
+    expect(text("recPlayMsg")).toBe("もう一度押すと、遊びかけの盤面をやめて、この盤面を始めます。");
+    expect($("recPlayMsg").hidden).toBe(false);
+    expect(boardRegions()).toEqual(regions);
+    expect(boardMarks()).toEqual(marks);
+
+    clickPlay(idOf(PA));
+    expect(boardRegions()).toEqual(PA.reg);
+    expect(boardMarks().every((v) => v === "")).toBe(true);
+    expect($("recPlayMsg").hidden).toBe(true);
+  });
+
+  it("確かめのあと時間がたったら、もう一度確かめる", async () => {
+    const h = await start({ kv: withBoards([[play(0, 300000), PA]]) });
+    click("hintBtn");
+    click("applyBtn");
+    const regions = boardRegions();
+    click("recBtn");
+    clickPlay(idOf(PA));
+    h.clock.now += 6000;
+    clickPlay(idOf(PA));
+    expect(boardRegions()).toEqual(regions);
+    expect(text("recPlayMsg")).toBe(PLAY_MESSAGES.confirm);
+  });
+
+  it("何も置いていなければ、すぐに始める", async () => {
+    await start({ kv: withBoards([[play(0, 300000), PA]]) });
+    expect(boardMarks().every((v) => v === "")).toBe(true);
+    click("recBtn");
+    clickPlay(idOf(PA));
+    expect(boardRegions()).toEqual(PA.reg);
+    expect($("recPlayMsg").hidden).toBe(true);
+  });
+
+  it("盤面の形が壊れていたら、遊ばずに知らせる", async () => {
+    const a1 = play(0, 300000);
+    // 文字と長さは合っているが、答えが無い盤面（全部が 1 つのエリア）
+    const kv = new MemoryStorage({
+      [MAIN_KEYS.history]: oldHistory([a1]),
+      [MAIN_KEYS.boards]: JSON.stringify({
+        [recordKey(a1)]: encodeBoard(8, new Array(64).fill(0)),
+      }),
+    });
+    await start({ kv });
+    const regions = boardRegions();
+    click("recBtn");
+    playButtons()[0]?.click();
+    expect(text("recPlayMsg")).toBe(PLAY_MESSAGES.broken);
+    expect(boardRegions()).toEqual(regions);
+  });
+});
+
+describe("クリアの画面からもう一度遊ぶ", () => {
+  it("クリアの画面のもう一度この盤面で、同じ盤面を最初から遊べる", async () => {
+    const h = await start();
+    solveTaking(h, 120000);
+    const regions = boardRegions();
+    expect(text("hintCount")).not.toBe("0");
+    click("winRetry");
+    expect($("win").hidden).toBe(true);
+    expect(boardRegions()).toEqual(regions);
+    expect(boardMarks().every((v) => v === "")).toBe(true);
+    expect(text("timer")).toBe("0:00");
+    expect(text("hintCount")).toBe("0");
+  });
+});
+
+describe("もう一度遊んだ記録は、成績の表とクリアの数に数えない", () => {
+  it("もう一度遊んだ記録は、成績の表に入れない", async () => {
+    const kv = withBoards([
+      [play(0, 300000), PA],
+      [play(1, 180000), PB],
+    ]);
+    const h = await start({ kv });
+    click("recBtn");
+    clickPlay(idOf(PA));
+    solveTaking(h, 90000);
+    expect(storedRecords(kv)).toHaveLength(3);
+    expect(summaryRows()).toEqual([["8×8 ふつう", "2", "4:00", "3:00", "3:00", "0.0"]]);
+  });
+
+  it("もう一度遊んでクリアしても、クリアの数は増えない", async () => {
+    const kv = withBoards([[play(0, 300000), PA]], {
+      [MAIN_KEYS.game]: oldGame({ solvedCount: 812 }),
+    });
+    const h = await start({ kv });
+    click("recBtn");
+    clickPlay(idOf(PA));
+    solveTaking(h, 90000);
+    expect(text("solved")).toBe("812");
+    expect(JSON.parse(kv.getItem(MAIN_KEYS.game) ?? "").solvedCount).toBe(812);
+    expect(storedRecords(kv)).toHaveLength(2);
+  });
+
+  it("初めての盤面をクリアしたら、クリアの数は増える", async () => {
+    const kv = withBoards([[play(0, 300000), PA]], {
+      [MAIN_KEYS.game]: oldGame({ solvedCount: 812 }),
+    });
+    const h = await start({ kv });
+    solveTaking(h, 90000);
+    expect(text("solved")).toBe("813");
+  });
+
+  it("盤面の形が無い記録は、初めての記録として数える", async () => {
+    await start({
+      kv: withBoards([
+        [play(0, 120000), null],
+        [play(1, 180000), null],
+      ]),
+    });
+    click("recBtn");
+    expect(summaryRows().map((r) => r.slice(0, 3))).toEqual([["8×8 ふつう", "2", "2:30"]]);
+  });
+});
+
+describe("もう一度クリアしたら、同じ盤面の記録と比べる", () => {
+  it("もう一度クリアしたら、その盤面の回数・前回・ベストを出す", async () => {
+    const h = await start({
+      kv: withBoards([
+        [play(0, 65000), PA],
+        [play(1, 105000), PA],
+      ]),
+    });
+    click("recBtn");
+    clickPlay(idOf(PA));
+    solveTaking(h, 85000);
+    expect(text("winCompare")).toBe("この盤面 3 回目　前回より 0:20 速い　ベスト 1:05");
+  });
+
+  it("その盤面で一番速ければ、この盤面の自己ベストと出す", async () => {
+    const h = await start({ kv: withBoards([[play(0, 300000), PA]]) });
+    click("recBtn");
+    clickPlay(idOf(PA));
+    solveTaking(h, 90000);
+    expect(text("winCompare")).toBe(
+      "この盤面の自己ベスト！　この盤面 2 回目　前回より 3:30 速い　ベスト 1:30",
+    );
+  });
+
+  it("初めての盤面は、同じ大きさ・難しさの初めての記録とだけ比べる", async () => {
+    const h = await start({
+      kv: withBoards([
+        [play(0, 300000), PA],
+        [play(1, 90000), PA],
+      ]),
+    });
+    // 最初に出ている問題（盤面 C）は、初めての盤面
+    solveTaking(h, 360000);
+    expect(text("winCompare")).toBe("前回より 1:00 遅い　平均 5:30（2回）");
+  });
+});
+
+describe("記録の一覧を並べ替え、絞り込み、さかのぼる", () => {
+  /** 8×8・ふつうで、盤面 A を 5:00、盤面 B を 3:00、A をもう一度 1:30 */
+  function abA(): MemoryStorage {
+    return withBoards([
+      [play(0, 300000, 3), PA],
+      [play(1, 180000, 1), PB],
+      [play(2, 90000, 0), PA],
+    ]);
+  }
+  /** 盤面ごとの行の、盤面 ID と、初回・ベスト・回数・最少ヒント */
+  function boardList(): string[][] {
+    return listRows().map((cells, i) => [listIds()[i] ?? "", ...cells.slice(1, 5)]);
+  }
+
+  it("盤面ごとに、ベストの遅い順に並べる", async () => {
+    await start({ kv: abA() });
+    click("recBtn");
+    choose("recSort", "slow");
+    expect(boardList()).toEqual([
+      [idOf(PB), "3:00", "3:00", "1", "1"],
+      [idOf(PA), "5:00", "1:30", "2", "0"],
+    ]);
+    expect(playButtons()).toHaveLength(2);
+  });
+
+  it("盤面ごとに、ベストの速い順に並べる", async () => {
+    await start({ kv: abA() });
+    click("recBtn");
+    choose("recSort", "fast");
+    expect(listIds()).toEqual([idOf(PA), idOf(PB)]);
+  });
+
+  it("盤面ごとに、一番少ないヒントの回数の多い順に並べる", async () => {
+    await start({ kv: abA() });
+    click("recBtn");
+    choose("recSort", "hints");
+    expect(boardList().map((r) => [r[0], r[4]])).toEqual([
+      [idOf(PB), "1"],
+      [idOf(PA), "0"],
+    ]);
+  });
+
+  it("盤面の大きさと難しさで絞る", async () => {
+    await start({
+      kv: withBoards([
+        [play(0, 300000), PA],
+        [play(1, 60000, 0, 6, 1), null],
+        [play(2, 180000), PB],
+      ]),
+    });
+    click("recBtn");
+    expect(listRows()).toHaveLength(3);
+    choose("recFilter", "8-2");
+    expect(listIds()).toEqual([idOf(PB), idOf(PA)]);
+    choose("recFilter", "all");
+    expect(listRows()).toHaveLength(3);
+  });
+
+  it("もっと見るで、古い記録までさかのぼれる", async () => {
+    const records = Array.from({ length: 70 }, (_, i) => play(i, 60000 + i * 1000));
+    await start({ kv: withBoards(records.map((r) => [r, null])) });
+    click("recBtn");
+    expect(listRows()).toHaveLength(30);
+    expect($("recMore").hidden).toBe(false);
+    click("recMore");
+    expect(listRows()).toHaveLength(60);
+    click("recMore");
+    expect(listRows()).toHaveLength(70);
+    expect($("recMore").hidden).toBe(true);
+    // 一番古い記録まで出ている
+    expect(listRows().at(-1)?.[2]).toBe("1:00");
+  });
+
+  it("新しい順の前回比は、もう一度遊んだ行なら同じ盤面の前回と比べる", async () => {
+    await start({ kv: abA() });
+    click("recBtn");
+    const rows = listRows();
+    // 列は、日時、盤面、タイム、前回比、ヒント、遊ぶ
+    expect(rows.map((r) => [r[2], r[3]])).toEqual([
+      ["1:30", "−3:30"],
+      ["3:00", "−2:00"],
+      ["5:00", "—"],
+    ]);
+    expect(rows[0]?.[1]).toContain("2回目");
+    expect(rows[1]?.[1]).not.toContain("回目");
+  });
+
+  it("盤面ごとの並びには、盤面の形がある記録だけを出す", async () => {
+    await start({
+      kv: withBoards([
+        [play(0, 120000), null],
+        [play(1, 180000), null],
+        [play(2, 300000), PA],
+      ]),
+    });
+    click("recBtn");
+    choose("recSort", "slow");
+    expect(listIds()).toEqual([idOf(PA)]);
+  });
+
+  it("盤面ごとに並べる盤面がまだ無ければ、そう出す", async () => {
+    await start({ kv: threeRecords() });
+    click("recBtn");
+    choose("recSort", "slow");
+    expect(listRows()).toHaveLength(0);
+    expect(text("recList")).toBe("もう一度遊べる盤面は、まだありません。");
+  });
+});
+
+describe("盤面の形を書き出し・読み込みで移す", () => {
+  async function exportFile(kv: MemoryStorage): Promise<string> {
+    const h = await start({ kv });
+    click("recBtn");
+    click("recExport");
+    return h.downloads[0]?.text ?? "";
+  }
+
+  it("書き出したファイルに、盤面の形が入る", async () => {
+    const a1 = play(0, 300000);
+    const old = play(1, 200000);
+    const file = JSON.parse(
+      await exportFile(
+        withBoards([
+          [a1, PA],
+          [old, null],
+        ]),
+      ),
+    );
+    expect(file.version).toBe(1);
+    expect(file.records).toEqual([{ ...a1, b: codeOf(PA) }, old]);
+  });
+
+  it("読み込むと、書き出したスマホで遊んだ盤面を遊べる", async () => {
+    const file = await exportFile(
+      withBoards([
+        [play(0, 300000), PA],
+        [play(1, 180000), PB],
+      ]),
+    );
+    click("recBtn");
+    const ids = listIds();
+    running.splice(0).forEach((app) => {
+      app.stop();
+    });
+
+    resetPage();
+    const h = await start({ kv: new MemoryStorage() });
+    click("recBtn");
+    await importFile(h, file);
+    expect(playButtons()).toHaveLength(2);
+    expect(listIds()).toEqual(ids);
+    expect(ids).toEqual([idOf(PB), idOf(PA)]);
+  });
+
+  it("盤面の形が無い前のファイルも読み込める", async () => {
+    const file = JSON.stringify({
+      format: "nekopatch-records",
+      version: 1,
+      exportedAt: "2026-10-22T01:00:00.000Z",
+      solvedCount: 812,
+      records: [A, A2, B],
+    });
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    click("recBtn");
+    await importFile(h, file);
+    expect(storedRecords(kv)).toEqual([A, A2, B]);
+    expect(listRows()).toHaveLength(3);
+    expect(playButtons()).toHaveLength(0);
+  });
+
+  it("盤面の符号が読めないファイルは、何も読み込まない", async () => {
+    const kv = withBoards([[play(0, 300000), PA]]);
+    const before = new Map(kv.items);
+    const h = await start({ kv });
+    click("recBtn");
+    const file = JSON.stringify({
+      format: "nekopatch-records",
+      version: 1,
+      solvedCount: 2,
+      records: [
+        { ...play(5, 100000), b: codeOf(PB) },
+        { ...play(6, 110000), b: codeOf(PC).slice(1) },
+      ],
+    });
+    await importFile(h, file);
+    expect(text("recImportMsg")).toBe(
+      "このファイルは読み込めませんでした。今の記録はそのままです。",
+    );
+    expect(kv.getItem(MAIN_KEYS.history)).toBe(before.get(MAIN_KEYS.history));
+    expect(kv.getItem(MAIN_KEYS.boards)).toBe(before.get(MAIN_KEYS.boards));
+  });
+});
+
+describe("記録を全部消すと、盤面の形も消える", () => {
+  it("記録を全部消すと、盤面の形も消える", async () => {
+    const kv = withBoards([
+      [play(0, 300000), PA],
+      [play(1, 180000), PB],
+    ]);
+    await start({ kv });
+    click("recBtn");
+    click("recClear");
+    click("recClear");
+    expect(kv.getItem(MAIN_KEYS.history)).toBe("[]");
+    expect(kv.getItem(MAIN_KEYS.boards)).toBe("{}");
+  });
+});
+
+describe("読めない盤面の保存データを消さない", () => {
+  it("読めない盤面の保存データは、消さずに別の場所に残す", async () => {
+    const kv = new MemoryStorage({
+      [MAIN_KEYS.history]: oldHistory([play(0, 300000)]),
+      [MAIN_KEYS.boards]: '{"1":',
+    });
+    await start({ kv });
+    expect(kv.getItem(`${MAIN_KEYS.boards}-unreadable-${TODAY}`)).toBe('{"1":');
+    click("recBtn");
+    expect(listRows()).toHaveLength(1);
+    expect(playButtons()).toHaveLength(0);
+    expect($("recUnreadable").hidden).toBe(false);
+    expect(text("recUnreadable")).toBe(
+      "読めない記録がありました。消さずに別の場所に残してあります。くろに相談してください。",
+    );
+  });
+});
+
+describe("確かめ用のページは、盤面の形も確かめ用のキーに置く", () => {
+  it("確かめ用のページは、盤面の形を確かめ用のキーに置く", async () => {
+    const kv = withBoards([[play(0, 300000), PA]]);
+    const before = kv.getItem(MAIN_KEYS.boards);
+    const h = await start({ kv, trial: true });
+    click("recBtn");
+    clickPlay(idOf(PA));
+    solveTaking(h, 90000);
+    expect(Object.values(storedBoards(kv, TRIAL_KEYS.boards))).toEqual([codeOf(PA), codeOf(PA)]);
+    expect(kv.getItem(MAIN_KEYS.boards)).toBe(before);
   });
 });

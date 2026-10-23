@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { recordKey } from "../../core/index.ts";
 import { MAIN_KEYS, SaveStore, TRIAL_KEYS, TRIAL_PREFIX, trialStorage } from "./save-store.ts";
 import { MemoryStorage } from "./test-support.ts";
 
 const A = { at: 1761000000000, n: 6, d: 1, t: 90000, h: 1 };
 const B = { at: 1761000100000, n: 8, d: 2, t: 200000, h: 0 };
 const now = () => 1761200000000;
+const key = (r: typeof A) => recordKey(r);
 
 describe("保存の場所", () => {
   it("一部だけ読める記録は、読めた分を使い、元の文字も残す", () => {
@@ -39,11 +41,23 @@ describe("保存の場所", () => {
     expect(kv.getItem(`${MAIN_KEYS.game}-unreadable-1761200000000`)).toBe("{");
   });
 
+  it("一部だけ読める盤面の形は、読めた分を使い、元の文字も残す", () => {
+    const code = "A".repeat(32);
+    const raw = JSON.stringify({ [key(B)]: code, [key(A)]: code });
+    const kv = new MemoryStorage({ [MAIN_KEYS.boards]: raw });
+    const store = new SaveStore(kv, MAIN_KEYS, now);
+    expect(store.loadBoards()).toEqual(new Map([[key(B), code]]));
+    expect(store.unreadableFound).toBe(true);
+    expect(kv.getItem(`${MAIN_KEYS.boards}-unreadable-1761200000000`)).toBe(raw);
+    expect(JSON.parse(kv.getItem(MAIN_KEYS.boards) ?? "")).toEqual({ [key(B)]: code });
+  });
+
   it("保存に失敗したら false を返す", () => {
     const kv = new MemoryStorage();
     const store = new SaveStore(kv, MAIN_KEYS, now);
     kv.failWrites = true;
     expect(store.saveRecords([A])).toBe(false);
+    expect(store.saveBoards(new Map())).toBe(false);
   });
 });
 
@@ -53,6 +67,7 @@ describe("確かめ用の保存領域", () => {
     const trial = trialStorage(kv);
     expect(() => trial.setItem(MAIN_KEYS.history, "[]")).toThrow();
     expect(() => trial.setItem(MAIN_KEYS.game, "{}")).toThrow();
+    expect(() => trial.setItem(MAIN_KEYS.boards, "{}")).toThrow();
     trial.setItem(TRIAL_KEYS.history, "[]");
     expect(kv.keysStartingWith("nekopatch-")).toEqual([TRIAL_KEYS.history]);
     for (const key of Object.values(TRIAL_KEYS)) expect(key.startsWith(TRIAL_PREFIX)).toBe(true);
@@ -65,5 +80,13 @@ describe("確かめ用の保存領域", () => {
     });
     trialStorage(kv);
     expect(kv.getItem(TRIAL_KEYS.history)).toBe("[]");
+  });
+
+  it("確かめ用のキーが無ければ、本物の盤面の形も写す", () => {
+    const boards = JSON.stringify({ [key(B)]: "A".repeat(32) });
+    const kv = new MemoryStorage({ [MAIN_KEYS.boards]: boards });
+    trialStorage(kv);
+    expect(kv.getItem(TRIAL_KEYS.boards)).toBe(boards);
+    expect(kv.getItem(MAIN_KEYS.boards)).toBe(boards);
   });
 });

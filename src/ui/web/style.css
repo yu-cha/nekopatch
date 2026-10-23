@@ -463,3 +463,31 @@ button:disabled {
   gap: 8px;
   flex-wrap: wrap;
 }
+/* ---- ここから、2026-10-23 に足した部品（同じ盤面をもう一度遊ぶ） ---- */
+/* クリアの画面の「もう一度この盤面」と「次の問題」 */
+.winBtns {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+/* 記録の一覧の盤面 ID と、もう一度遊んだ回数 */
+.rec .bid {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.rec .nth {
+  margin-left: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+.rec td .play {
+  padding: 3px 9px;
+  font-size: 0.8rem;
+}
+#recMore {
+  align-self: center;
+}

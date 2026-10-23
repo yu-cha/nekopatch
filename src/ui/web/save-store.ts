@@ -2,13 +2,17 @@
 // 保存のキーと形は、作り直す前（2026-10-21 まで）と同じ。ナンの今までの記録をそのまま読む。
 // 確かめ用のページ（/nekopatch/preview/）は、同じ yu-cha.github.io の保存領域を本物と共有するので、
 // 別のキーを使い、本物のキーには書かない（decisions の 2026-10-22 の判断を参照）。
+// 遊んだ盤面の形は、記録とは別のキーに置く。盤面を知らない前の版が記録を保存し直しても、消えないようにするため（判断 490d）。
 
 import {
+  type Boards,
   type ClearRecord,
   type GameState,
   parseSavedGame,
+  parseStoredBoards,
   parseStoredHistory,
   type SavedGame,
+  serializeBoards,
   serializeGame,
   serializeHistory,
 } from "../../core/index.ts";
@@ -24,16 +28,23 @@ export interface StorageKeys {
   readonly game: string;
   /** クリアの記録 */
   readonly history: string;
+  /** 遊んだ盤面の形（記録の鍵 → 盤面の符号） */
+  readonly boards: string;
 }
 
-/** 本物のキー（作り直す前と同じ） */
-export const MAIN_KEYS: StorageKeys = { game: "nekopatch-v1", history: "nekopatch-history-v1" };
+/** 本物のキー（game と history は作り直す前と同じ） */
+export const MAIN_KEYS: StorageKeys = {
+  game: "nekopatch-v1",
+  history: "nekopatch-history-v1",
+  boards: "nekopatch-boards-v1",
+};
 
 /** 確かめ用のページのキー。すべてこの前置きで始める */
 export const TRIAL_PREFIX = "nekopatch-preview-";
 export const TRIAL_KEYS: StorageKeys = {
   game: `${TRIAL_PREFIX}v1`,
   history: `${TRIAL_PREFIX}history-v1`,
+  boards: `${TRIAL_PREFIX}boards-v1`,
 };
 
 /**
@@ -49,7 +60,7 @@ export function trialStorage(storage: KeyValue, prefix: string = TRIAL_PREFIX): 
       storage.setItem(key, value);
     },
   };
-  for (const name of ["game", "history"] as const) {
+  for (const name of ["game", "history", "boards"] as const) {
     if (guarded.getItem(TRIAL_KEYS[name]) !== null) continue;
     const real = guarded.getItem(MAIN_KEYS[name]);
     if (real !== null) {
@@ -92,6 +103,20 @@ export class SaveStore {
 
   saveRecords(records: readonly ClearRecord[]): boolean {
     return this.write(this.keys.history, serializeHistory(records));
+  }
+
+  loadBoards(): Map<string, string> {
+    const raw = this.read(this.keys.boards);
+    const { boards, intact } = parseStoredBoards(raw);
+    if (!intact && raw !== null && this.keepUnreadable(this.keys.boards, raw)) {
+      // 読めた盤面の形だけで書き直す。次からは、読めない部分を毎回残し直さない
+      this.saveBoards(boards);
+    }
+    return boards;
+  }
+
+  saveBoards(boards: Boards): boolean {
+    return this.write(this.keys.boards, serializeBoards(boards));
   }
 
   loadGame(): SavedGame | null {

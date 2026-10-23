@@ -1,24 +1,33 @@
 // 画面の動き。元の nekopatch.html（2026-10-21 に受け取ったもの）の画面の処理を写したもの。
 // 遊び方と見た目は変えない（ナンとの合意 2026-10-21 の 6）。足したのは「記録」の画面の、保存の状態と書き出し・読み込み。
+// 2026-10-23 に、同じ盤面をもう一度遊ぶ仕組み（記録の一覧の「遊ぶ」、並べ替え、クリアの画面の「もう一度この盤面」）を足した。
 // ブラウザの機能（保存、問題作りの Worker、保存領域の頼み、ファイルの書き出し）は env を通して使い、テストでは偽物に差し替える。
 
 import {
   attacks,
+  type BoardSort,
+  boardRows,
+  type Category,
   type CellState,
   type ClearRecord,
   compareWin,
   conflicts,
+  encodeBoard,
   exportFileName,
   exportText,
   formatTime as fmt,
+  historyRows,
   importRecords,
   LEVEL_NAMES,
+  LEVELS,
   nextHint,
   type PlayingPuzzle,
   type Puzzle,
   parseExport,
   REGION_NAMES,
-  recentRows,
+  recordKey,
+  restorePuzzle,
+  SIZES,
   summarize,
 } from "../../core/index.ts";
 import {
@@ -60,6 +69,19 @@ export const IMPORT_MESSAGES = {
   added: (n: number) => `記録を読み込みました。増えた記録は ${n} 件です。`,
 } as const;
 
+export const PLAY_MESSAGES = {
+  confirm: "もう一度押すと、遊びかけの盤面をやめて、この盤面を始めます。",
+  broken: "この盤面は遊べませんでした。くろに相談してください。",
+} as const;
+
+/** 記録の一覧を、何行ずつ出すか */
+const LIST_PAGE = 30;
+/** 遊びかけのときの「遊ぶ」の確かめを、何ミリ秒待つか */
+const PLAY_CONFIRM_MS = 5000;
+
+/** 記録の一覧の並び。new は新しい順（1 回 1 行）、ほかは盤面ごと */
+type ListSort = "new" | BoardSort;
+
 type DragMode = "paint" | "erase" | "pendX" | "pendCat";
 
 export function startApp(doc: Document, env: AppEnv): App {
@@ -75,6 +97,8 @@ export function startApp(doc: Document, env: AppEnv): App {
   const applyBtn = $<HTMLButtonElement>("applyBtn");
   const recPanel = $("recPanel");
   const recFile = $<HTMLInputElement>("recFile");
+  const recSort = $<HTMLSelectElement>("recSort");
+  const recFilter = $<HTMLSelectElement>("recFilter");
 
   const pending = new Set<Promise<unknown>>();
   const stopped = new AbortController();
@@ -111,7 +135,10 @@ export function startApp(doc: Document, env: AppEnv): App {
   let pendingStep: { readonly cells: readonly number[]; readonly to: 1 | 2 } | null = null;
   let hints = 0;
   let records: ClearRecord[] = env.store.loadRecords();
+  let boards: Map<string, string> = env.store.loadBoards();
   let saveFailed = false;
+  /** 問題作りの頼みの番号。あとから別の盤面を始めたら、前に頼んだ問題は使わない */
+  let puzzleRequest = 0;
   let persistState: PersistState | null = null;
 
   const cellState = (i: number): CellState => st[i] ?? 0;
@@ -128,6 +155,7 @@ export function startApp(doc: Document, env: AppEnv): App {
    */
   function syncFromStore(): void {
     records = env.store.loadRecords();
+    boards = env.store.loadBoards();
     solvedCount = Math.max(solvedCount, env.store.storedSolvedCount());
     $("solved").textContent = String(solvedCount);
   }
@@ -266,45 +294,66 @@ export function startApp(doc: Document, env: AppEnv): App {
     render();
     say(DEFAULT_MESSAGE);
     if (!won) startTimer();
+    $("timer").textContent = fmt(curElapsed());
     save();
     prefetch(playing.N, diff);
   }
   function newPuzzle(): void {
     const N = Number(sizeSel.value);
     const diff = Number(diffSel.value);
+    const request = ++puzzleRequest;
     stopTimer();
     $("loading").hidden = false;
     $("win").hidden = true;
     track(
       takePuzzle(N, diff).then((p) => {
+        if (request !== puzzleRequest) return;
         $("loading").hidden = true;
         setPuzzle(p, diff, false);
       }),
     );
   }
+  /** 前に遊んだ盤面を、何も置いていない状態から始める。大きさと難しさの選択も、その盤面に合わせる */
+  function replay(p: Puzzle, diff: number): void {
+    puzzleRequest++;
+    stopTimer();
+    sizeSel.value = String(p.N);
+    diffSel.value = String(diff);
+    $("loading").hidden = true;
+    setPuzzle(p, diff, false);
+    boardEl.scrollIntoView?.({ behavior: "smooth", block: "center" });
+  }
+  function versusPrev(diff: number): string {
+    return diff < 0
+      ? `前回より <span class="faster">${fmt(-diff)} 速い</span>`
+      : diff > 0
+        ? `前回より <span class="slower">${fmt(diff)} 遅い</span>`
+        : "前回と同じタイム";
+  }
   function onWin(p: PlayingPuzzle): void {
     won = true;
     stopTimer();
     syncFromStore();
-    solvedCount++;
     clearMarks();
     const lv = LEVEL_NAMES[p.diff] ?? "";
     const rec: ClearRecord = { at: env.now(), n: p.N, d: p.diff, t: elapsed, h: hints };
-    const cmp = compareWin(records, rec);
+    const code = encodeBoard(p.N, p.reg);
+    const cmp = compareWin(records, rec, boards, code);
+    // 「クリア ○ 問」は、初めて解いた盤面の数（ナンとの合意 2026-10-23）
+    if (cmp.kind === "first") solvedCount++;
+    // 盤面の形を先に保存する。盤面の保存に失敗しても、記録は残る（もう一度遊べないだけ）
+    boards.set(recordKey(rec), code);
+    const boardSaved = env.store.saveBoards(boards);
     records.push(rec);
     const recorded = env.store.saveRecords(records);
-    markSaved(recorded);
+    markSaved(boardSaved && recorded);
     $("winText").textContent = `${p.N}×${p.N}・${lv}　タイム ${fmt(elapsed)}　ヒント ${hints}回`;
     let text: string;
-    if (cmp.prev !== null) {
-      const diff = elapsed - cmp.prev.t;
-      text =
-        diff < 0
-          ? `前回より <span class="faster">${fmt(-diff)} 速い</span>`
-          : diff > 0
-            ? `前回より <span class="slower">${fmt(diff)} 遅い</span>`
-            : "前回と同じタイム";
-      text += `　平均 ${fmt(cmp.avg)}（${cmp.count}回）`;
+    if (cmp.kind === "replay") {
+      text = `この盤面 ${cmp.nth} 回目　${versusPrev(elapsed - cmp.prev.t)}　ベスト ${fmt(cmp.best)}`;
+      if (cmp.isBest) text = `<b>この盤面の自己ベスト！</b>　${text}`;
+    } else if (cmp.prev !== null) {
+      text = `${versusPrev(elapsed - cmp.prev.t)}　平均 ${fmt(cmp.avg)}（${cmp.count}回）`;
       if (cmp.isBest) text = `<b>自己ベスト！</b>　${text}`;
     } else text = "この盤面・難しさで初めてのクリア！";
     $("winCompare").innerHTML = text;
@@ -460,6 +509,9 @@ export function startApp(doc: Document, env: AppEnv): App {
   };
   $("newBtn").onclick = newPuzzle;
   $("winNext").onclick = newPuzzle;
+  $("winRetry").onclick = () => {
+    if (P !== null && won) replay(P, P.diff);
+  };
   sizeSel.onchange = () => {
     prefetch(Number(sizeSel.value), Number(diffSel.value));
     newPuzzle();
@@ -471,13 +523,27 @@ export function startApp(doc: Document, env: AppEnv): App {
   autoX.onchange = save;
 
   // ---------- 記録 ----------
+  let listLimit = LIST_PAGE;
+  for (const n of SIZES)
+    for (const d of LEVELS) {
+      const o = doc.createElement("option");
+      o.value = `${n}-${d}`;
+      o.textContent = `${n}×${n} ${LEVEL_NAMES[d] ?? ""}`;
+      recFilter.append(o);
+    }
+  function listFilter(): Category | null {
+    if (recFilter.value === "all") return null;
+    const [n = 0, d = 0] = recFilter.value.split("-").map(Number);
+    return { n, d };
+  }
   function renderHist(): void {
-    const summary = summarize(records);
+    const summary = summarize(records, boards);
     const curK = `${Number(sizeSel.value)}-${Number(diffSel.value)}`;
     if (summary.length === 0) {
       $("recSummary").innerHTML =
         '<p class="empty">まだ記録がありません。1問クリアするとここに出ます。</p>';
       $("recList").innerHTML = "";
+      $("recMore").hidden = true;
       return;
     }
     let t =
@@ -486,24 +552,113 @@ export function startApp(doc: Document, env: AppEnv): App {
       t += `<tr class="${`${g.n}-${g.d}` === curK ? "cur" : ""}"><td>${g.n}×${g.n} ${LEVEL_NAMES[g.d] ?? ""}</td><td>${g.count}</td><td>${fmt(g.avg)}</td><td>${fmt(g.best)}</td><td>${fmt(g.last)}</td><td>${g.avgHints.toFixed(1)}</td></tr>`;
     }
     $("recSummary").innerHTML = `${t}</tbody></table>`;
-    // 最近の記録と、同じ盤面・難しさの前回との比べ
-    let l =
-      "<table><thead><tr><th>日時</th><th>盤面・難しさ</th><th>タイム</th><th>前回比</th><th>ヒント</th></tr></thead><tbody>";
-    for (const { record: h, diff: df } of recentRows(records, 30)) {
-      const dt = new Date(h.at);
-      const ds = `${dt.getMonth() + 1}/${dt.getDate()} ${dt.getHours()}:${String(dt.getMinutes()).padStart(2, "0")}`;
-      let c = "—";
-      if (df !== null)
-        c =
-          df < 0
-            ? `<span class="faster">−${fmt(-df)}</span>`
-            : df > 0
-              ? `<span class="slower">+${fmt(df)}</span>`
-              : "±0:00";
-      l += `<tr><td>${ds}</td><td>${h.n}×${h.n} ${LEVEL_NAMES[h.d] ?? ""}</td><td>${fmt(h.t)}</td><td>${c}</td><td>${h.h}</td></tr>`;
-    }
-    $("recList").innerHTML = `${l}</tbody></table>`;
+    renderList();
   }
+  /** 盤面のセル（大きさ・難しさ、盤面 ID、何回目か） */
+  function boardCell(n: number, d: number, id: string | null, nth: number): string {
+    const times = nth > 1 ? `<span class="nth">${nth}回目</span>` : "";
+    return `<td>${n}×${n} ${LEVEL_NAMES[d] ?? ""}<br><span class="bid">${id ?? "—"}</span>${times}</td>`;
+  }
+  function playCell(n: number, d: number, code: string | null): string {
+    // 符号は base64url の文字だけなので、属性にそのまま書ける
+    return code === null
+      ? "<td></td>"
+      : `<td><button type="button" class="play" data-n="${n}" data-d="${d}" data-b="${code}">遊ぶ</button></td>`;
+  }
+  /** 記録の一覧。新しい順は 1 回 1 行で、同じ盤面の前回（初めての盤面は、同じ盤面・難しさの前回）との比べを付ける */
+  function renderList(): void {
+    const sort = recSort.value as ListSort;
+    const filter = listFilter();
+    let l: string;
+    let more: boolean;
+    let count: number;
+    if (sort === "new") {
+      const res = historyRows(records, boards, filter, listLimit);
+      ({ more } = res);
+      count = res.rows.length;
+      l =
+        "<table><thead><tr><th>日時</th><th>盤面</th><th>タイム</th><th>前回比</th><th>ヒント</th><th></th></tr></thead><tbody>";
+      for (const { record: h, code, id, nth, diff: df } of res.rows) {
+        const dt = new Date(h.at);
+        const ds = `${dt.getMonth() + 1}/${dt.getDate()} ${dt.getHours()}:${String(dt.getMinutes()).padStart(2, "0")}`;
+        let c = "—";
+        if (df !== null)
+          c =
+            df < 0
+              ? `<span class="faster">−${fmt(-df)}</span>`
+              : df > 0
+                ? `<span class="slower">+${fmt(df)}</span>`
+                : "±0:00";
+        l += `<tr><td>${ds}</td>${boardCell(h.n, h.d, id, nth)}<td>${fmt(h.t)}</td><td>${c}</td><td>${h.h}</td>${playCell(h.n, h.d, code)}</tr>`;
+      }
+    } else {
+      const res = boardRows(records, boards, filter, sort, listLimit);
+      ({ more } = res);
+      count = res.rows.length;
+      l =
+        "<table><thead><tr><th>盤面</th><th>初回</th><th>ベスト</th><th>回数</th><th>最少ヒント</th><th></th></tr></thead><tbody>";
+      for (const g of res.rows)
+        l += `<tr>${boardCell(g.n, g.d, g.id, 1)}<td>${fmt(g.first)}</td><td>${fmt(g.best)}</td><td>${g.count}</td><td>${g.minHints}</td>${playCell(g.n, g.d, g.code)}</tr>`;
+    }
+    $("recList").innerHTML =
+      count > 0
+        ? `${l}</tbody></table>`
+        : `<p class="empty">${sort === "new" ? "この盤面・難しさの記録は、まだありません。" : "もう一度遊べる盤面は、まだありません。"}</p>`;
+    $("recMore").hidden = !more;
+  }
+  recSort.onchange = () => {
+    listLimit = LIST_PAGE;
+    renderList();
+  };
+  recFilter.onchange = recSort.onchange;
+  $("recMore").onclick = () => {
+    listLimit += LIST_PAGE;
+    renderList();
+  };
+
+  // ---------- 記録の一覧から、同じ盤面をもう一度遊ぶ ----------
+  let playArmed: { readonly key: string; readonly at: number } | null = null;
+  function showPlayMessage(text: string | null): void {
+    const el = $("recPlayMsg");
+    el.textContent = text ?? "";
+    el.hidden = text === null;
+  }
+  function disarmPlay(): void {
+    playArmed = null;
+    for (const b of $("recList").querySelectorAll<HTMLButtonElement>("button.play"))
+      b.textContent = "遊ぶ";
+    showPlayMessage(null);
+  }
+  $("recList").addEventListener("click", (e) => {
+    const btn = (e.target as Element | null)?.closest<HTMLButtonElement>("button.play");
+    if (btn === null || btn === undefined) return;
+    const n = Number(btn.dataset.n);
+    const d = Number(btn.dataset.d);
+    const code = btn.dataset.b ?? "";
+    const key = `${n}|${d}|${code}`;
+    // 遊んでいる途中（クリアしていない盤面に、猫か × を置いている）なら、もう一度押してから始める
+    const busy = P !== null && !won && st.some((v) => v !== 0);
+    const armed =
+      playArmed !== null && playArmed.key === key && env.now() - playArmed.at <= PLAY_CONFIRM_MS;
+    if (busy && !armed) {
+      disarmPlay();
+      const at = env.now();
+      playArmed = { key, at };
+      btn.textContent = "もう一度押す";
+      showPlayMessage(PLAY_MESSAGES.confirm);
+      setTimeout(() => {
+        if (playArmed?.at === at) disarmPlay();
+      }, PLAY_CONFIRM_MS);
+      return;
+    }
+    disarmPlay();
+    const p = restorePuzzle(n, code);
+    if (p === null) {
+      showPlayMessage(PLAY_MESSAGES.broken);
+      return;
+    }
+    replay(p, d);
+  });
   function renderKeep(): void {
     $("recKeep").textContent = persistMessage(persistState);
   }
@@ -518,6 +673,8 @@ export function startApp(doc: Document, env: AppEnv): App {
   $("recBtn").onclick = () => {
     recPanel.hidden = !recPanel.hidden;
     if (!recPanel.hidden) {
+      listLimit = LIST_PAGE;
+      disarmPlay();
       renderHist();
       // 押したときにも頼み直す（Chrome は、操作の中で頼むと通しやすい）
       if (persistState !== "persisted") checkPersist();
@@ -539,7 +696,9 @@ export function startApp(doc: Document, env: AppEnv): App {
     }
     clearArmed = 0;
     records = [];
-    markSaved(env.store.saveRecords(records));
+    boards = new Map();
+    // 記録を先に消す（盤面の形だけが残っても害は無い）
+    markSaved(env.store.saveRecords(records) && env.store.saveBoards(boards));
     $("recClear").textContent = "記録を全部消す";
     renderHist();
   };
@@ -553,7 +712,7 @@ export function startApp(doc: Document, env: AppEnv): App {
   $("recExport").onclick = () => {
     syncFromStore();
     const now = new Date(env.now());
-    env.download(exportFileName(now), exportText({ solvedCount, records }, now));
+    env.download(exportFileName(now), exportText({ solvedCount, records, boards }, now));
   };
   $("recImport").onclick = () => recFile.click();
   recFile.onchange = () => {
@@ -574,13 +733,16 @@ export function startApp(doc: Document, env: AppEnv): App {
       return;
     }
     syncFromStore();
-    const { data: merged, added } = importRecords({ solvedCount, records }, data);
+    const { data: merged, added } = importRecords({ solvedCount, records, boards }, data);
     const next = [...merged.records];
-    if (!env.store.saveRecords(next)) {
+    const nextBoards = new Map(merged.boards);
+    // 盤面の形を先に保存する（記録の保存に失敗しても、盤面の形が余るだけで害は無い）
+    if (!env.store.saveBoards(nextBoards) || !env.store.saveRecords(next)) {
       showImportMessage(IMPORT_MESSAGES.saveFailed);
       return;
     }
     records = next;
+    boards = nextBoards;
     solvedCount = merged.solvedCount;
     $("solved").textContent = String(solvedCount);
     save();
