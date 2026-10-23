@@ -11,8 +11,8 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&family=Zen+Maru+Gothic:wght@500;700&display=swap">
-  <script type="module" crossorigin src="./assets/index-CQLfm5XE.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-BTSx2iRf.css">
+  <script type="module" crossorigin src="./assets/index-C0u4YFEG.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-DwumJjZt.css">
 </head>
 <body>
 
@@ -45,7 +45,7 @@
     <div id="loading" hidden>問題を作っています…</div>
     <div id="win" hidden><div class="card">
       <h2>クリア！</h2><p id="winText"></p><p id="winCompare"></p>
-      <button type="button" class="primary" id="winNext">次の問題</button>
+      <div class="winBtns"><button type="button" id="winRetry">もう一度この盤面</button><button type="button" class="primary" id="winNext">次の問題</button></div>
     </div></div>
   </div>
 
@@ -64,8 +64,19 @@
   <section class="rec" id="recPanel" hidden>
     <h3>同じ盤面・難しさごとの成績 <button type="button" id="recClose">閉じる</button></h3>
     <div class="tbl" id="recSummary"></div>
-    <h3>最近の記録 <button type="button" id="recClear">記録を全部消す</button></h3>
+    <h3>記録の一覧</h3>
+    <div class="row">
+      <select id="recSort" aria-label="並び">
+        <option value="new" selected>新しい順</option><option value="slow">タイムの遅い順</option>
+        <option value="fast">タイムの速い順</option><option value="hints">ヒントの多い順</option>
+      </select>
+      <select id="recFilter" aria-label="盤面・難しさで絞る">
+        <option value="all" selected>全部</option>
+      </select>
+    </div>
+    <p class="note" id="recPlayMsg" hidden></p>
     <div class="tbl" id="recList"></div>
+    <button type="button" id="recMore" hidden>もっと見る</button>
     <h3>記録の保存</h3>
     <p class="note" id="recKeep">確かめています…</p>
     <p class="note bad" id="recSaveError" hidden>記録を保存できませんでした。スマホの空きが足りないかもしれません。くろに相談してください。</p>
@@ -77,6 +88,13 @@
     </div>
     <p class="note" id="recImportMsg" hidden></p>
     <p class="note">機種変更のときに使います。古いスマホで「記録を書き出す」を押してファイルにし、新しいスマホで「記録を読み込む」からそのファイルを選びます。</p>
+    <div class="dangerZone" id="recClearZone">
+      <button type="button" id="recClear">記録を全部消す</button>
+      <div id="recClearConfirm" hidden>
+        <p class="note bad">記録を全部消すと、元に戻せません。消す前に「記録を書き出す」でファイルにしておくと、あとで「記録を読み込む」で戻せます。</p>
+        <div class="row"><button type="button" id="recClearYes">本当に全部消す</button><button type="button" id="recClearNo">やめる</button></div>
+      </div>
+    </div>
   </section>
 
   <div class="help">
