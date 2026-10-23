@@ -8,7 +8,9 @@ import {
   encodeBoard,
   generate,
   type Puzzle,
+  parseSavedGame,
   REGION_NAMES,
+  type RecordNote,
   recordKey,
   solutionCells,
 } from "../../core/index.ts";
@@ -1166,5 +1168,662 @@ describe("確かめ用のページは、盤面の形も確かめ用のキーに�
     solveTaking(h, 90000);
     expect(Object.values(storedBoards(kv, TRIAL_KEYS.boards))).toEqual([codeOf(PA), codeOf(PA)]);
     expect(kv.getItem(MAIN_KEYS.boards)).toBe(before);
+  });
+});
+
+// ---------- 記録に備考を書く（record-notes） ----------
+
+/** 記録と、その備考と印を保存した状態（ほかのキーも足せる） */
+function withNotes(
+  records: readonly ClearRecord[],
+  notes: [ClearRecord, RecordNote][],
+  extra: Record<string, string> = {},
+): MemoryStorage {
+  return new MemoryStorage({
+    [MAIN_KEYS.history]: oldHistory(records),
+    [MAIN_KEYS.notes]: JSON.stringify(Object.fromEntries(notes.map(([r, n]) => [recordKey(r), n]))),
+    ...extra,
+  });
+}
+function storedNotes(kv: MemoryStorage, key = MAIN_KEYS.notes): Record<string, RecordNote> {
+  return JSON.parse(kv.getItem(key) ?? "{}");
+}
+/** 欄に文字を入れる。change を付けると、欄から外れたとき（決定、欄の外を押す）と同じ */
+function typeInto(input: HTMLElement, value: string, change = true): void {
+  (input as HTMLInputElement).value = value;
+  if (change) input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+/** 新しい順の一覧で、記録 r の行 */
+function recordRow(r: ClearRecord): HTMLTableRowElement {
+  const row = [...document.querySelectorAll<HTMLTableRowElement>("#recList tbody tr")].find(
+    (tr) => tr.querySelector<HTMLElement>("button.noteBtn")?.dataset.k === recordKey(r),
+  );
+  if (row === undefined) throw new Error(`${recordKey(r)} の行がありません`);
+  return row;
+}
+/** 記録 r の行のすぐ下の備考の行の文字。備考の行が無ければ null */
+function remarkOf(r: ClearRecord): string | null {
+  const next = recordRow(r).nextElementSibling;
+  return next?.classList.contains("noteRow") === true ? (next.textContent ?? "") : null;
+}
+function clickNote(r: ClearRecord): void {
+  recordRow(r).querySelector<HTMLButtonElement>("button.noteBtn")?.click();
+}
+function editor(): HTMLInputElement {
+  const input = document.querySelector<HTMLInputElement>("#recList input.memoInput");
+  if (input === null) throw new Error("書く欄が開いていません");
+  return input;
+}
+function clickInEditor(cls: "hardBtn" | "noteClose"): void {
+  const btn = document.querySelector<HTMLButtonElement>(`#recList button.${cls}`);
+  if (btn === null) throw new Error(`書く欄に ${cls} がありません`);
+  btn.click();
+}
+function setAutoX(on: boolean): void {
+  const box = $("autoX") as HTMLInputElement;
+  box.checked = on;
+  box.dispatchEvent(new Event("change"));
+}
+function catsOnBoard(): number {
+  return document.querySelectorAll('#board .cell[data-v="cat"]').length;
+}
+/** ヒントの「この×を付ける」「猫を置く」で、猫を 1 匹置くまで進める */
+function placeOneCatWithHints(): void {
+  const before = catsOnBoard();
+  for (let n = 0; n < 300 && catsOnBoard() === before; n++) {
+    click("hintBtn");
+    if (!$("applyBtn").hidden) click("applyBtn");
+  }
+  expect(catsOnBoard()).toBeGreaterThan(before);
+}
+/** ほかのアプリに切り替える（ページが隠れる） */
+function goBackground(): void {
+  Object.defineProperty(document, "hidden", { value: true, configurable: true });
+  document.dispatchEvent(new Event("visibilitychange"));
+  Object.defineProperty(document, "hidden", { value: false, configurable: true });
+}
+/** 新しい順の一覧の、記録 r のヒントの欄の下の段 */
+function hintSubOf(r: ClearRecord): string | null {
+  return recordRow(r).querySelectorAll("td")[4]?.querySelector(".sub")?.textContent ?? null;
+}
+
+describe("クリアの画面で備考を書く", () => {
+  it("クリアの画面で書いたひと言を、その記録の備考として残す", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    solveTaking(h, 65000);
+    // 決定を押さずに「次の問題」を押しても、書いた文は残る
+    typeInto($("winMemo"), "左下で迷った", false);
+    click("winNext");
+    await h.app.whenIdle();
+    const [r] = storedRecords(kv);
+    if (r === undefined) throw new Error("記録がありません");
+    expect(storedNotes(kv)).toEqual({ [recordKey(r)]: { memo: "左下で迷った" } });
+    click("recBtn");
+    expect(remarkOf(r)).toBe("左下で迷った");
+  });
+
+  it("クリアの画面の難を押すと印が付き、もう一度押すと外れる", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    solveTaking(h, 65000);
+    const key = recordKey(storedRecords(kv)[0] ?? A);
+    expect($("winHard").getAttribute("aria-pressed")).toBe("false");
+    click("winHard");
+    expect($("winHard").getAttribute("aria-pressed")).toBe("true");
+    expect(storedNotes(kv)).toEqual({ [key]: { hard: true } });
+    click("winHard");
+    expect($("winHard").getAttribute("aria-pressed")).toBe("false");
+    expect(storedNotes(kv)).toEqual({});
+  });
+
+  it("何も書かずに次へ進むと、備考は付かない", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    solveTaking(h, 65000);
+    click("winNext");
+    await h.app.whenIdle();
+    expect(storedRecords(kv)).toHaveLength(1);
+    expect(storedNotes(kv)).toEqual({});
+  });
+
+  it("備考の文は、前後の空白と改行を除き、30 文字までにする", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    solveTaking(h, 65000);
+    const key = recordKey(storedRecords(kv)[0] ?? A);
+    typeInto($("winMemo"), "  左下で\n迷った  ");
+    expect(storedNotes(kv)[key]).toEqual({ memo: "左下で迷った" });
+    expect(($("winMemo") as HTMLInputElement).value).toBe("左下で迷った");
+    typeInto($("winMemo"), "あ".repeat(40));
+    expect(storedNotes(kv)[key]).toEqual({ memo: "あ".repeat(30) });
+    // 画面の欄にも、30 文字の上限がある
+    expect($("winMemo").getAttribute("maxlength")).toBe("30");
+  });
+
+  it("ほかのアプリに切り替えても、書きかけの備考は残る", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    solveTaking(h, 65000);
+    typeInto($("winMemo"), "あとで見る", false);
+    goBackground();
+    const key = recordKey(storedRecords(kv)[0] ?? A);
+    expect(storedNotes(kv)).toEqual({ [key]: { memo: "あとで見る" } });
+  });
+});
+
+describe("記録の一覧から備考を書き直す", () => {
+  it("記録の一覧の✎で、前の記録にもあとから備考を書ける", async () => {
+    const kv = threeRecords();
+    await start({ kv });
+    click("recBtn");
+    // 一番下の行が、6×6 かんたんの古い方（A）
+    const rows = document.querySelectorAll<HTMLElement>("#recList tbody tr button.noteBtn");
+    expect(rows[rows.length - 1]?.dataset.k).toBe(recordKey(A));
+    clickNote(A);
+    expect(document.activeElement).toBe(editor());
+    typeInto(editor(), "サクサク解けた", false);
+    clickInEditor("noteClose");
+    expect(storedNotes(kv)).toEqual({ [recordKey(A)]: { memo: "サクサク解けた" } });
+    expect(document.querySelector("#recList input.memoInput")).toBeNull();
+    expect(remarkOf(A)).toBe("サクサク解けた");
+    // 記録の形は変わらない
+    expect(storedRecords(kv)).toEqual([A, A2, B]);
+  });
+
+  it("記録の一覧の✎で、備考を書き直したり消したりできる", async () => {
+    const kv = withNotes([A], [[A, { memo: "左下で迷った", hard: true }]]);
+    await start({ kv });
+    click("recBtn");
+    expect(remarkOf(A)).toBe("難 左下で迷った");
+    clickNote(A);
+    expect(editor().value).toBe("左下で迷った");
+    expect(document.querySelector("#recList .hardBtn")?.getAttribute("aria-pressed")).toBe("true");
+    typeInto(editor(), "");
+    clickInEditor("noteClose");
+    expect(remarkOf(A)).toBe("難");
+    expect(storedNotes(kv)).toEqual({ [recordKey(A)]: { hard: true } });
+
+    clickNote(A);
+    clickInEditor("hardBtn");
+    // 「難」を押しても、書く欄は開いたまま
+    expect(document.querySelector("#recList .hardBtn")?.getAttribute("aria-pressed")).toBe("false");
+    clickInEditor("noteClose");
+    expect(remarkOf(A)).toBeNull();
+    expect(storedNotes(kv)).toEqual({});
+  });
+
+  it("✎ をもう一度押すと、書く欄を閉じる", async () => {
+    await start({ kv: threeRecords() });
+    click("recBtn");
+    clickNote(B);
+    expect(editor()).not.toBeNull();
+    expect(recordRow(B).querySelector(".noteBtn")?.getAttribute("aria-expanded")).toBe("true");
+    clickNote(B);
+    expect(document.querySelector("#recList input.memoInput")).toBeNull();
+  });
+
+  it("書く欄を開いているあいだに、ほかのタブで保存データが変わっても、書く欄は消えない", async () => {
+    const kv = threeRecords();
+    const h = await start({ kv });
+    click("recBtn");
+    clickNote(B);
+    typeInto(editor(), "書きかけ", false);
+    kv.setItem(MAIN_KEYS.notes, JSON.stringify({ [recordKey(A)]: { memo: "ほかのタブ" } }));
+    h.notifyOtherTab();
+    expect(editor().value).toBe("書きかけ");
+    clickInEditor("noteClose");
+    expect(remarkOf(A)).toBe("ほかのタブ");
+    expect(remarkOf(B)).toBe("書きかけ");
+  });
+});
+
+describe("備考を記録の一覧に出す", () => {
+  it("備考は、記録の行のすぐ下に、難の印と文を並べて出す", async () => {
+    const r0 = play(0, 300000);
+    const r1 = play(1, 200000);
+    const r2 = play(2, 100000);
+    await start({
+      kv: withNotes(
+        [r0, r1, r2],
+        [
+          [r0, { memo: "左下で迷った", hard: true }],
+          [r2, { memo: "サクサク" }],
+        ],
+      ),
+    });
+    click("recBtn");
+    const rows = [...document.querySelectorAll<HTMLElement>("#recList tbody tr")].map((tr) =>
+      tr.classList.contains("noteRow")
+        ? `備考 ${tr.textContent}`
+        : `記録 ${tr.querySelector<HTMLElement>(".noteBtn")?.dataset.k}`,
+    );
+    expect(rows).toEqual([
+      `記録 ${recordKey(r2)}`,
+      "備考 サクサク",
+      `記録 ${recordKey(r1)}`,
+      `記録 ${recordKey(r0)}`,
+      "備考 難 左下で迷った",
+    ]);
+    expect(document.querySelector("#recList tr.noteRow .hard")?.textContent).toBe("難");
+  });
+
+  it("備考の文字は、HTML として扱わない", async () => {
+    await start({ kv: withNotes([A], [[A, { memo: "<img src=x><b>太</b>" }]]) });
+    click("recBtn");
+    expect(remarkOf(A)).toBe("<img src=x><b>太</b>");
+    expect($("recList").querySelector("img, b")).toBeNull();
+    // 書く欄にも、文字のまま入る
+    clickNote(A);
+    expect(editor().value).toBe("<img src=x><b>太</b>");
+    expect($("recList").querySelector("img, b")).toBeNull();
+  });
+
+  it("盤面ごとの並びでは、難が付いた盤面の行に難と出す", async () => {
+    const a1 = play(0, 300000);
+    const a2 = play(1, 200000);
+    const b1 = play(2, 100000);
+    const kv = withBoards([
+      [a1, PA],
+      [a2, PA],
+      [b1, PB],
+    ]);
+    kv.setItem(
+      MAIN_KEYS.notes,
+      JSON.stringify({ [recordKey(a1)]: { hard: true }, [recordKey(b1)]: { memo: "楽勝" } }),
+    );
+    await start({ kv });
+    click("recBtn");
+    choose("recSort", "slow");
+    const marks = [...document.querySelectorAll("#recList tbody tr")].map((tr) => [
+      tr.querySelector(".bid")?.textContent,
+      tr.querySelector(".hard")?.textContent ?? "",
+    ]);
+    expect(marks).toEqual([
+      [idOf(PA), "難"],
+      [idOf(PB), ""],
+    ]);
+    expect(text("recList")).not.toContain("楽勝");
+    expect(document.querySelector("#recList button.noteBtn")).toBeNull();
+  });
+});
+
+describe("前回の備考をクリアの画面に出す", () => {
+  it("初めての盤面をクリアしたら、同じ大きさ・難しさの前回の備考を出す", async () => {
+    const r = play(0, 300000);
+    const h = await start({ kv: withNotes([r], [[r, { memo: "左下で迷った", hard: true }]]) });
+    solveTaking(h, 60000);
+    expect($("winPrevNote").hidden).toBe(false);
+    expect(text("winPrevNote")).toBe("前回の備考: 難 左下で迷った");
+  });
+
+  it("同じ盤面をもう一度クリアしたら、その盤面の前回の備考を出す", async () => {
+    const a1 = play(0, 300000);
+    const b1 = play(1, 200000);
+    const kv = withBoards([
+      [a1, PA],
+      [b1, PB],
+    ]);
+    kv.setItem(
+      MAIN_KEYS.notes,
+      JSON.stringify({
+        [recordKey(a1)]: { memo: "左下で迷った" },
+        [recordKey(b1)]: { memo: "楽勝" },
+      }),
+    );
+    const h = await start({ kv });
+    click("recBtn");
+    clickPlay(idOf(PA));
+    solveTaking(h, 90000);
+    expect(text("winCompare")).toContain("この盤面 2 回目");
+    expect(text("winPrevNote")).toBe("前回の備考: 左下で迷った");
+  });
+
+  it("前回の記録に備考が無ければ、前回の備考は出さない", async () => {
+    const h = await start({ kv: withNotes([play(0, 300000)], []) });
+    solveTaking(h, 60000);
+    expect($("winPrevNote").hidden).toBe(true);
+    expect(text("winPrevNote")).toBe("");
+  });
+});
+
+describe("自動×を使ったかの印を残す", () => {
+  it("自動×をONにして猫を置いてクリアすると、自動×の印が残る", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    setAutoX(true);
+    solveTaking(h, 65000);
+    expect(text("winText")).toMatch(/^8×8・ふつう　タイム 1:05　ヒント \d+回　自動×$/);
+    const [r] = storedRecords(kv);
+    if (r === undefined) throw new Error("記録がありません");
+    expect(storedNotes(kv)).toEqual({ [recordKey(r)]: { autoX: true } });
+    click("recBtn");
+    expect(hintSubOf(r)).toBe("自動×");
+    // 自動×の印だけなら、備考の行は出さない
+    expect(remarkOf(r)).toBeNull();
+  });
+
+  it("途中で自動×をOFFにしても、ONのまま猫を置いていれば印が残る", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    setAutoX(true);
+    placeOneCatWithHints();
+    setAutoX(false);
+    // 「戻す」「最初から」を押しても消えない
+    click("undoBtn");
+    click("resetBtn");
+    click("resetBtn");
+    solveTaking(h, 65000);
+    expect(text("winText")).toContain("自動×");
+    expect(Object.values(storedNotes(kv))).toEqual([{ autoX: true }]);
+  });
+
+  it("自動×をONにしても、猫を置く前にOFFにすれば印は付かない", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    setAutoX(true);
+    setAutoX(false);
+    solveTaking(h, 65000);
+    expect(text("winText")).not.toContain("自動×");
+    expect(storedNotes(kv)).toEqual({});
+    click("recBtn");
+    expect(hintSubOf(storedRecords(kv)[0] ?? A)).toBeNull();
+  });
+
+  it("遊びかけの盤面を開き直しても、自動×を使ったことは続く", async () => {
+    const kv = new MemoryStorage();
+    const first = await start({ kv });
+    setAutoX(true);
+    placeOneCatWithHints();
+    setAutoX(false);
+    first.app.stop();
+    resetPage();
+    const h = await start({ kv });
+    expect(catsOnBoard()).toBeGreaterThan(0);
+    solveTaking(h, 65000);
+    expect(Object.values(storedNotes(kv))).toEqual([{ autoX: true }]);
+  });
+
+  it("新しい問題は、自動×の印の無い状態から始める", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    setAutoX(true);
+    placeOneCatWithHints();
+    setAutoX(false);
+    click("newBtn");
+    await h.app.whenIdle();
+    solveTaking(h, 65000);
+    expect(storedNotes(kv)).toEqual({});
+  });
+
+  it("自動×の印があっても、成績と前回との比べは分けない", async () => {
+    const h = await start({ kv: withNotes([play(0, 300000)], []) });
+    setAutoX(true);
+    solveTaking(h, 180000);
+    expect(text("winCompare")).toContain("前回より 2:00 速い　平均 4:00（2回）");
+    click("recBtn");
+    expect(summaryRows().find((r) => r[0] === "8×8 ふつう")?.[1]).toBe("2");
+  });
+});
+
+describe("備考と印は、記録とは別のキーに置く", () => {
+  it("備考と印は、記録とは別のキーに置き、記録の形は変えない", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    setAutoX(true);
+    solveTaking(h, 65000);
+    click("winHard");
+    typeInto($("winMemo"), "左下で迷った");
+    click("winNext");
+    await h.app.whenIdle();
+    const [r] = storedRecords(kv);
+    if (r === undefined) throw new Error("記録がありません");
+    expect(Object.keys(r)).toEqual(["at", "n", "d", "t", "h"]);
+    expect(kv.getItem(MAIN_KEYS.notes)).toBe(
+      `{"${recordKey(r)}":{"memo":"左下で迷った","hard":true,"autoX":true}}`,
+    );
+  });
+
+  it("備考を知らない版が記録を保存し直しても、備考と印は残る", async () => {
+    const r1 = play(0, 300000);
+    const kv = withNotes([r1], [[r1, { memo: "左下で迷った" }]]);
+    const notes = kv.getItem(MAIN_KEYS.notes);
+    // 今配信している版は、5 つの値だけの形で記録を保存し直す
+    kv.setItem(MAIN_KEYS.history, oldHistory([r1, play(1, 200000)]));
+    await start({ kv });
+    expect(kv.getItem(MAIN_KEYS.notes)).toBe(notes);
+    click("recBtn");
+    expect(remarkOf(r1)).toBe("左下で迷った");
+  });
+
+  it("別のタブで書いた備考を、古い写しで消さない", async () => {
+    const kv = withNotes([A, B], []);
+    await start({ kv });
+    click("recBtn");
+    // このタブがまだ知らないうちに、ほかのタブが A に備考を書く（storage の出来事は届いていない）
+    kv.setItem(MAIN_KEYS.notes, JSON.stringify({ [recordKey(A)]: { memo: "一つ目" } }));
+    clickNote(B);
+    typeInto(editor(), "二つ目");
+    clickInEditor("noteClose");
+    expect(storedNotes(kv)).toEqual({
+      [recordKey(A)]: { memo: "一つ目" },
+      [recordKey(B)]: { memo: "二つ目" },
+    });
+    expect(remarkOf(A)).toBe("一つ目");
+  });
+
+  it("読めない備考の保存データは、消さずに別の場所に残す", async () => {
+    const kv = withNotes([A], [], { [MAIN_KEYS.notes]: '{"1":' });
+    await start({ kv });
+    expect(kv.getItem(`${MAIN_KEYS.notes}-unreadable-${TODAY}`)).toBe('{"1":');
+    click("recBtn");
+    expect(listRows()).toHaveLength(1);
+    expect($("recUnreadable").hidden).toBe(false);
+    expect(text("recUnreadable")).toBe(
+      "読めない記録がありました。消さずに別の場所に残してあります。くろに相談してください。",
+    );
+  });
+
+  it("確かめ用のページは、備考と印を確かめ用のキーに置く", async () => {
+    const kv = withNotes([A], [[A, { memo: "本物" }]]);
+    const before = kv.getItem(MAIN_KEYS.notes);
+    await start({ kv, trial: true });
+    click("recBtn");
+    expect(remarkOf(A)).toBe("本物");
+    clickNote(A);
+    typeInto(editor(), "確かめ");
+    clickInEditor("noteClose");
+    expect(storedNotes(kv, TRIAL_KEYS.notes)).toEqual({ [recordKey(A)]: { memo: "確かめ" } });
+    expect(kv.getItem(MAIN_KEYS.notes)).toBe(before);
+  });
+});
+
+describe("備考と印を書き出し・読み込みで移す", () => {
+  /** ねこパッチの記録のファイル（版 1） */
+  function fileOf(records: readonly object[], solvedCount = records.length): string {
+    return JSON.stringify({ format: "nekopatch-records", version: 1, solvedCount, records });
+  }
+
+  it("書き出したファイルに、備考と印が入る", async () => {
+    const r1 = play(0, 300000);
+    const r2 = play(1, 200000);
+    const h = await start({
+      kv: withNotes([r1, r2], [[r1, { memo: "左下で迷った", hard: true, autoX: true }]]),
+    });
+    click("recBtn");
+    click("recExport");
+    const fileText = h.downloads[0]?.text ?? "";
+    const lines = fileText.split("\n").filter((l) => l.includes('"at"'));
+    expect(lines[0]).toContain('"memo":"左下で迷った","hard":true,"autoX":true');
+    expect(lines[1]).not.toMatch(/memo|hard|autoX/);
+    expect(JSON.parse(fileText).version).toBe(1);
+  });
+
+  it("読み込むと、書き出したスマホの備考と印が移る", async () => {
+    const r1 = play(0, 300000);
+    const r2 = play(1, 200000);
+    const r3 = play(2, 100000);
+    const first = await start({
+      kv: withNotes(
+        [r1, r2, r3],
+        [
+          [r1, { memo: "左下で迷った", hard: true }],
+          [r2, { autoX: true }],
+          [r3, { memo: "楽勝", autoX: true }],
+        ],
+      ),
+    });
+    click("recBtn");
+    const rowsBefore = [...document.querySelectorAll("#recList tbody tr")].map(
+      (tr) => tr.textContent,
+    );
+    click("recExport");
+    const fileText = first.downloads[0]?.text ?? "";
+    first.app.stop();
+    resetPage();
+
+    const h = await start({ kv: new MemoryStorage() });
+    click("recBtn");
+    await importFile(h, fileText);
+    const rowsAfter = [...document.querySelectorAll("#recList tbody tr")].map(
+      (tr) => tr.textContent,
+    );
+    expect(rowsAfter).toEqual(rowsBefore);
+    expect(hintSubOf(r2)).toBe("自動×");
+    expect(remarkOf(r1)).toBe("難 左下で迷った");
+  });
+
+  it("同じ記録があれば、今のスマホに備考が無いときだけファイルの備考を使う", async () => {
+    const kv = withNotes([A, B], [[A, { memo: "今の" }]]);
+    const h = await start({ kv });
+    click("recBtn");
+    await importFile(
+      h,
+      fileOf([
+        { ...A, memo: "古い", hard: true, autoX: true },
+        { ...B, memo: "楽勝" },
+      ]),
+    );
+    expect(storedNotes(kv)).toEqual({
+      [recordKey(A)]: { memo: "今の", autoX: true },
+      [recordKey(B)]: { memo: "楽勝" },
+    });
+    expect(remarkOf(A)).toBe("今の");
+    expect(hintSubOf(A)).toBe("自動×");
+  });
+
+  it("備考と印の無い前のファイルも読み込める", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    click("recBtn");
+    await importFile(h, fileOf([A, B]));
+    expect(text("recImportMsg")).toBe("記録を読み込みました。増えた記録は 2 件です。");
+    expect(storedRecords(kv)).toEqual([A, B]);
+    expect(storedNotes(kv)).toEqual({});
+  });
+
+  it("備考が読めないファイルは、何も読み込まない", async () => {
+    const kv = withNotes([C], [[C, { memo: "今の" }]]);
+    const before = new Map(kv.items);
+    const h = await start({ kv });
+    click("recBtn");
+    await importFile(h, fileOf([A, { ...B, memo: 3 }]));
+    expect(text("recImportMsg")).toBe(
+      "このファイルは読み込めませんでした。今の記録はそのままです。",
+    );
+    expect(kv.getItem(MAIN_KEYS.history)).toBe(before.get(MAIN_KEYS.history));
+    expect(kv.getItem(MAIN_KEYS.notes)).toBe(before.get(MAIN_KEYS.notes));
+  });
+});
+
+describe("記録を全部消すと、備考と印も消す", () => {
+  it("記録を全部消すと、備考と印も消える", async () => {
+    const kv = withNotes(
+      [A, B],
+      [
+        [A, { memo: "左下で迷った", autoX: true }],
+        [B, { autoX: true }],
+      ],
+    );
+    await start({ kv });
+    click("recBtn");
+    click("recClear");
+    click("recClearYes");
+    expect(kv.getItem(MAIN_KEYS.history)).toBe("[]");
+    expect(kv.getItem(MAIN_KEYS.notes)).toBe("{}");
+  });
+});
+
+describe("備考の欄でのキー操作は、盤面の操作にしない", () => {
+  it("備考の欄でnやhを打っても、新しい問題やヒントにならない", async () => {
+    const h = await start({ kv: threeRecords() });
+    // 遊びかけにする（ヒントで × か猫を 1 つ置く）
+    click("hintBtn");
+    click("applyBtn");
+    const marks = boardMarks();
+    const regions = boardRegions();
+    click("recBtn");
+    clickNote(B);
+    for (const init of [
+      { key: "n" },
+      { key: "h" },
+      { key: "z", ctrlKey: true },
+      { key: "y", ctrlKey: true },
+    ])
+      editor().dispatchEvent(new KeyboardEvent("keydown", { ...init, bubbles: true }));
+    await h.app.whenIdle();
+    expect(boardRegions()).toEqual(regions);
+    expect(boardMarks()).toEqual(marks);
+    expect(text("hintCount")).toBe("1");
+    // 欄の外では、今までどおりキーで操作できる
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "h", bubbles: true }));
+    expect(text("hintCount")).toBe("2");
+  });
+
+  it("備考の欄で決定を押すと、欄から外れて保存する", async () => {
+    const kv = threeRecords();
+    await start({ kv });
+    click("recBtn");
+    clickNote(B);
+    const input = editor();
+    input.value = "決定で保存";
+    let blurred = false;
+    input.addEventListener("blur", () => {
+      blurred = true;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(blurred).toBe(true);
+    expect(storedNotes(kv)).toEqual({ [recordKey(B)]: { memo: "決定で保存" } });
+  });
+});
+
+describe("今までの記録を引き継ぐ（自動×の欄）", () => {
+  const OLD_FIELDS = ["P", "st", "elapsed", "won", "solvedCount", "hints", "autoX", "size", "diff"];
+
+  it("自動×を使っていない遊びかけの盤面は、作り直す前と同じ欄で保存する", async () => {
+    const kv = new MemoryStorage();
+    await start({ kv });
+    click("hintBtn");
+    click("applyBtn");
+    expect(Object.keys(JSON.parse(kv.getItem(MAIN_KEYS.game) ?? "{}"))).toEqual(OLD_FIELDS);
+  });
+
+  it("自動×を使った遊びかけの盤面は、欄を 1 つ足して保存し、前の版も読める", async () => {
+    const kv = new MemoryStorage();
+    await start({ kv });
+    setAutoX(true);
+    placeOneCatWithHints();
+    const raw = kv.getItem(MAIN_KEYS.game) ?? "{}";
+    const saved = JSON.parse(raw);
+    expect(Object.keys(saved)).toEqual([...OLD_FIELDS, "autoXUsed"]);
+    expect(saved.autoXUsed).toBe(true);
+    expect(parseSavedGame(raw).game?.playing?.autoXUsed).toBe(true);
+    // 前の版は、足した欄を読み飛ばす。足した欄を除いた値も、同じ遊びかけの盤面として読める
+    const { autoXUsed: _, ...old } = saved;
+    const asOld = parseSavedGame(JSON.stringify(old));
+    expect(asOld.intact).toBe(true);
+    expect(asOld.game?.playing?.st).toEqual(saved.st);
+    expect(asOld.game?.playing?.autoXUsed).toBe(false);
   });
 });
