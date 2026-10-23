@@ -471,21 +471,33 @@ button:disabled {
   flex-wrap: wrap;
   justify-content: center;
 }
-/* 記録の一覧の盤面 ID と、もう一度遊んだ回数 */
-.rec .bid {
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 0.78rem;
+/* 記録の一覧。スマホの幅でも「遊ぶ」まで見えるよう、すき間を詰め、セルを 2 段にする */
+.rec #recList th,
+.rec #recList td {
+  padding: 6px 4px;
+}
+.rec #recList .board {
+  text-align: left;
+  white-space: normal;
+  word-break: keep-all;
+}
+.rec .sub {
+  display: block;
+  font-size: 0.76rem;
+  font-weight: 500;
   color: var(--muted);
-  letter-spacing: 0.04em;
+}
+/* 盤面 ID と、もう一度遊んだ回数 */
+.rec .bid {
+  letter-spacing: 0.05em;
 }
 .rec .nth {
   margin-left: 6px;
-  font-size: 0.78rem;
   font-weight: 700;
   color: var(--accent);
 }
 .rec td .play {
-  padding: 3px 9px;
+  padding: 3px 8px;
   font-size: 0.8rem;
 }
 #recMore {

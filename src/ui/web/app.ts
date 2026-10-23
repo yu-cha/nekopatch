@@ -554,10 +554,11 @@ export function startApp(doc: Document, env: AppEnv): App {
     $("recSummary").innerHTML = `${t}</tbody></table>`;
     renderList();
   }
-  /** 盤面のセル（大きさ・難しさ、盤面 ID、何回目か） */
+  // 記録の一覧は、スマホの幅（360px ほど）でも「遊ぶ」まで見えるよう、セルを 2 段にして列を減らす
+  /** 盤面のセル（大きさ・難しさと、下の段に盤面 ID と何回目か） */
   function boardCell(n: number, d: number, id: string | null, nth: number): string {
     const times = nth > 1 ? `<span class="nth">${nth}回目</span>` : "";
-    return `<td>${n}×${n} ${LEVEL_NAMES[d] ?? ""}<br><span class="bid">${id ?? "—"}</span>${times}</td>`;
+    return `<td class="board">${n}×${n} ${LEVEL_NAMES[d] ?? ""}<span class="sub"><span class="bid">${id ?? "—"}</span>${times}</span></td>`;
   }
   function playCell(n: number, d: number, code: string | null): string {
     // 符号は base64url の文字だけなので、属性にそのまま書ける
@@ -577,10 +578,10 @@ export function startApp(doc: Document, env: AppEnv): App {
       ({ more } = res);
       count = res.rows.length;
       l =
-        "<table><thead><tr><th>日時</th><th>盤面</th><th>タイム</th><th>前回比</th><th>ヒント</th><th></th></tr></thead><tbody>";
+        '<table><thead><tr><th>日時</th><th class="board">盤面</th><th>タイム<span class="sub">前回比</span></th><th>ヒント</th><th></th></tr></thead><tbody>';
       for (const { record: h, code, id, nth, diff: df } of res.rows) {
         const dt = new Date(h.at);
-        const ds = `${dt.getMonth() + 1}/${dt.getDate()} ${dt.getHours()}:${String(dt.getMinutes()).padStart(2, "0")}`;
+        const ds = `${dt.getMonth() + 1}/${dt.getDate()}<span class="sub">${dt.getHours()}:${String(dt.getMinutes()).padStart(2, "0")}</span>`;
         let c = "—";
         if (df !== null)
           c =
@@ -589,14 +590,14 @@ export function startApp(doc: Document, env: AppEnv): App {
               : df > 0
                 ? `<span class="slower">+${fmt(df)}</span>`
                 : "±0:00";
-        l += `<tr><td>${ds}</td>${boardCell(h.n, h.d, id, nth)}<td>${fmt(h.t)}</td><td>${c}</td><td>${h.h}</td>${playCell(h.n, h.d, code)}</tr>`;
+        l += `<tr><td>${ds}</td>${boardCell(h.n, h.d, id, nth)}<td>${fmt(h.t)}<span class="sub df">${c}</span></td><td>${h.h}</td>${playCell(h.n, h.d, code)}</tr>`;
       }
     } else {
       const res = boardRows(records, boards, filter, sort, listLimit);
       ({ more } = res);
       count = res.rows.length;
       l =
-        "<table><thead><tr><th>盤面</th><th>初回</th><th>ベスト</th><th>回数</th><th>最少ヒント</th><th></th></tr></thead><tbody>";
+        '<table><thead><tr><th class="board">盤面</th><th>初回</th><th>ベスト</th><th>回数</th><th>最少<br>ヒント</th><th></th></tr></thead><tbody>';
       for (const g of res.rows)
         l += `<tr>${boardCell(g.n, g.d, g.id, 1)}<td>${fmt(g.first)}</td><td>${fmt(g.best)}</td><td>${g.count}</td><td>${g.minHints}</td>${playCell(g.n, g.d, g.code)}</tr>`;
     }

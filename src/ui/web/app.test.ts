@@ -579,6 +579,13 @@ function listIds(): string[] {
     (tr) => tr.querySelector(".bid")?.textContent ?? "",
   );
 }
+/** 新しい順の一覧の行の、タイムと前回比 */
+function listTimes(): [string, string][] {
+  return [...document.querySelectorAll("#recList tbody tr")].map((tr) => {
+    const cell = tr.querySelectorAll("td")[2];
+    return [cell?.firstChild?.textContent ?? "", cell?.querySelector(".df")?.textContent ?? ""];
+  });
+}
 function playButtons(): HTMLButtonElement[] {
   return [...document.querySelectorAll<HTMLButtonElement>("#recList button.play")];
 }
@@ -933,19 +940,19 @@ describe("記録の一覧を並べ替え、絞り込み、さかのぼる", () =
     expect(listRows()).toHaveLength(70);
     expect($("recMore").hidden).toBe(true);
     // 一番古い記録まで出ている
-    expect(listRows().at(-1)?.[2]).toBe("1:00");
+    expect(listTimes().at(-1)).toEqual(["1:00", "—"]);
   });
 
   it("新しい順の前回比は、もう一度遊んだ行なら同じ盤面の前回と比べる", async () => {
     await start({ kv: abA() });
     click("recBtn");
-    const rows = listRows();
-    // 列は、日時、盤面、タイム、前回比、ヒント、遊ぶ
-    expect(rows.map((r) => [r[2], r[3]])).toEqual([
+    expect(listTimes()).toEqual([
       ["1:30", "−3:30"],
       ["3:00", "−2:00"],
       ["5:00", "—"],
     ]);
+    // 列は、日時、盤面（盤面 ID と何回目か）、タイム（前回比）、ヒント、遊ぶ
+    const rows = listRows();
     expect(rows[0]?.[1]).toContain("2回目");
     expect(rows[1]?.[1]).not.toContain("回目");
   });
