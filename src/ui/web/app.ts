@@ -685,24 +685,8 @@ export function startApp(doc: Document, env: AppEnv): App {
   $("recClose").onclick = () => {
     recPanel.hidden = true;
   };
-  let clearArmed = 0;
-  $("recClear").onclick = () => {
-    if (env.now() - clearArmed > 3000) {
-      clearArmed = env.now();
-      $("recClear").textContent = "もう一度押すと消します";
-      setTimeout(() => {
-        $("recClear").textContent = "記録を全部消す";
-      }, 3000);
-      return;
-    }
-    clearArmed = 0;
-    records = [];
-    boards = new Map();
-    // 記録を先に消す（盤面の形だけが残っても害は無い）
-    markSaved(env.store.saveRecords(records) && env.store.saveBoards(boards));
-    $("recClear").textContent = "記録を全部消す";
-    renderHist();
-  };
+  // 「記録を全部消す」は置かない。間違って押して何年分もの記録を失わないよう、消すのは Chrome の設定からにする
+  // （ナンとの合意 2026-10-23。消し方は記録の画面の一番下に書いてある）
 
   // ---------- 書き出しと読み込み（機種変更のとき） ----------
   function showImportMessage(text: string): void {

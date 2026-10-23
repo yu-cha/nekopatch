@@ -511,9 +511,7 @@ describe("確かめ用のページ", () => {
     await importFile(h, file);
     expect(storedRecords(kv, TRIAL_KEYS.history)).toEqual([A, A2, B, C]);
     solveWithHints();
-    click("recClear");
-    click("recClear");
-    expect(storedRecords(kv, TRIAL_KEYS.history)).toEqual([]);
+    expect(storedRecords(kv, TRIAL_KEYS.history)).toHaveLength(5);
 
     for (const key of [MAIN_KEYS.history, MAIN_KEYS.game, MAIN_KEYS.boards])
       expect(kv.getItem(key)).toBe(before.get(key) ?? null);
@@ -1064,18 +1062,18 @@ describe("盤面の形を書き出し・読み込みで移す", () => {
   });
 });
 
-describe("記録を全部消すと、盤面の形も消える", () => {
-  it("記録を全部消すと、盤面の形も消える", async () => {
-    const kv = withBoards([
-      [play(0, 300000), PA],
-      [play(1, 180000), PB],
-    ]);
-    await start({ kv });
+describe("記録はゲームの中では全部消せない", () => {
+  it("記録を全部消すボタンは無く、消し方を案内する", async () => {
+    await start({ kv: threeRecords() });
     click("recBtn");
-    click("recClear");
-    click("recClear");
-    expect(kv.getItem(MAIN_KEYS.history)).toBe("[]");
-    expect(kv.getItem(MAIN_KEYS.boards)).toBe("{}");
+    expect(document.getElementById("recClear")).toBeNull();
+    const buttons = [...document.querySelectorAll("button")].map((b) => b.textContent ?? "");
+    expect(buttons.filter((t) => t.includes("記録を全部消す"))).toEqual([]);
+    // 記録の画面の一番下
+    expect($("recPanel").lastElementChild?.id).toBe("recDeleteHelp");
+    expect(text("recDeleteHelp")).toBe(
+      "記録を全部消したいとき: 間違って消さないよう、このゲームの中では消せません。Chrome の設定の「サイトの設定」で、yu-cha.github.io の保存データを削除すると消えます（yu-cha.github.io のほかのページの保存データも一緒に消えます）。消した記録は戻せないので、先に「記録を書き出す」でファイルにしてください。",
+    );
   });
 });
 
