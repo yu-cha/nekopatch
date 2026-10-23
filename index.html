@@ -87,7 +87,13 @@
     </div>
     <p class="note" id="recImportMsg" hidden></p>
     <p class="note">機種変更のときに使います。古いスマホで「記録を書き出す」を押してファイルにし、新しいスマホで「記録を読み込む」からそのファイルを選びます。</p>
-    <p class="note" id="recDeleteHelp">記録を全部消したいとき: 間違って消さないよう、このゲームの中では消せません。Chrome の設定の「サイトの設定」で、yu-cha.github.io の保存データを削除すると消えます（yu-cha.github.io のほかのページの保存データも一緒に消えます）。消した記録は戻せないので、先に「記録を書き出す」でファイルにしてください。</p>
+    <div class="dangerZone" id="recClearZone">
+      <button type="button" id="recClear">記録を全部消す</button>
+      <div id="recClearConfirm" hidden>
+        <p class="note bad">記録を全部消すと、元に戻せません。消す前に「記録を書き出す」でファイルにしておくと、あとで「記録を読み込む」で戻せます。</p>
+        <div class="row"><button type="button" id="recClearYes">本当に全部消す</button><button type="button" id="recClearNo">やめる</button></div>
+      </div>
+    </div>
   </section>
 
   <div class="help">

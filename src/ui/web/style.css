@@ -503,3 +503,22 @@ button:disabled {
 #recMore {
   align-self: center;
 }
+/* 「記録を全部消す」。間違って押さないよう、一番下に小さく置く */
+.dangerZone {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.rec #recClear {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+.rec #recClearYes {
+  color: var(--bad);
+  border-color: var(--bad);
+}

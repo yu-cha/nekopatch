@@ -50,6 +50,8 @@ export interface AppEnv {
   /** ほかのタブ（ホーム画面のアプリを含む）が保存データを書き換えたら、listener を呼ぶ */
   onStorageChange(listener: () => void, signal: AbortSignal): void;
   now(): number;
+  /** ブラウザの確かめの窓（OK／キャンセル）を出し、OK なら true */
+  confirm(message: string): boolean;
 }
 
 export interface App {
@@ -73,6 +75,10 @@ export const PLAY_MESSAGES = {
   confirm: "もう一度押すと、遊びかけの盤面をやめて、この盤面を始めます。",
   broken: "この盤面は遊べませんでした。くろに相談してください。",
 } as const;
+
+/** 「記録を全部消す」の最後の確かめ（ブラウザの確かめの窓） */
+export const CLEAR_CONFIRM_MESSAGE =
+  "記録を全部消します。消した記録は戻せません。本当に消しますか？";
 
 /** 記録の一覧を、何行ずつ出すか */
 const LIST_PAGE = 30;
@@ -676,6 +682,7 @@ export function startApp(doc: Document, env: AppEnv): App {
     if (!recPanel.hidden) {
       listLimit = LIST_PAGE;
       disarmPlay();
+      $("recClearConfirm").hidden = true;
       renderHist();
       // 押したときにも頼み直す（Chrome は、操作の中で頼むと通しやすい）
       if (persistState !== "persisted") checkPersist();
@@ -685,8 +692,24 @@ export function startApp(doc: Document, env: AppEnv): App {
   $("recClose").onclick = () => {
     recPanel.hidden = true;
   };
-  // 「記録を全部消す」は置かない。間違って押して何年分もの記録を失わないよう、消すのは Chrome の設定からにする
-  // （ナンとの合意 2026-10-23。消し方は記録の画面の一番下に書いてある）
+  // 「記録を全部消す」は、間違って押して何年分もの記録を失わないよう、記録の画面の一番下に置き、
+  // 押す → 注意の文と「本当に全部消す」 → ブラウザの確かめの窓、の 3 回で消す（ナンとの合意 2026-10-23）
+  $("recClear").onclick = () => {
+    $("recClearConfirm").hidden = false;
+  };
+  $("recClearNo").onclick = () => {
+    $("recClearConfirm").hidden = true;
+  };
+  $("recClearYes").onclick = () => {
+    const yes = env.confirm(CLEAR_CONFIRM_MESSAGE);
+    $("recClearConfirm").hidden = true;
+    if (!yes) return;
+    records = [];
+    boards = new Map();
+    // 記録を先に消す（盤面の形だけが残っても害は無い）
+    markSaved(env.store.saveRecords(records) && env.store.saveBoards(boards));
+    renderHist();
+  };
 
   // ---------- 書き出しと読み込み（機種変更のとき） ----------
   function showImportMessage(text: string): void {

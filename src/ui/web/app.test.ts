@@ -12,7 +12,14 @@ import {
   recordKey,
   solutionCells,
 } from "../../core/index.ts";
-import { type App, type AppEnv, IMPORT_MESSAGES, PLAY_MESSAGES, startApp } from "./app.ts";
+import {
+  type App,
+  type AppEnv,
+  CLEAR_CONFIRM_MESSAGE,
+  IMPORT_MESSAGES,
+  PLAY_MESSAGES,
+  startApp,
+} from "./app.ts";
 import { persistMessage } from "./persistence.ts";
 import { MAIN_KEYS, SaveStore, TRIAL_KEYS, trialStorage } from "./save-store.ts";
 import { MemoryStorage, seededRandom } from "./test-support.ts";
@@ -44,11 +51,15 @@ interface Harness {
   readonly clock: { now: number };
   /** ほかのタブが保存データを書き換えたことを、このタブに知らせる（storage の出来事） */
   readonly notifyOtherTab: () => void;
+  /** ブラウザの確かめの窓に出した文 */
+  readonly confirms: string[];
 }
 
 interface Options {
   readonly kv?: MemoryStorage;
   readonly trial?: boolean;
+  /** ブラウザの確かめの窓で OK を押すか（既定は OK） */
+  readonly confirmAnswer?: boolean;
   /** 消さないよう頼む機能。none なら機能が無い */
   readonly persist?: { readonly persisted: boolean; readonly grant: boolean } | "none";
 }
@@ -64,6 +75,7 @@ async function start(options: Options = {}): Promise<Harness> {
   const persist = options.persist ?? { persisted: false, grant: true };
   let granted = persist !== "none" && persist.persisted;
   let storageListener = () => {};
+  const confirms: string[] = [];
   // 問題を作るたびに別の盤面にする（同じ盤面ばかりだと、もう一度遊んだ記録になる）
   let made = 0;
   const env: AppEnv = {
@@ -90,6 +102,10 @@ async function start(options: Options = {}): Promise<Harness> {
       storageListener = listener;
     },
     now,
+    confirm: (message) => {
+      confirms.push(message);
+      return options.confirmAnswer ?? true;
+    },
   };
   const app = startApp(document, env);
   running.push(app);
@@ -101,6 +117,7 @@ async function start(options: Options = {}): Promise<Harness> {
     persistCalls: () => calls,
     clock,
     notifyOtherTab: () => storageListener(),
+    confirms,
   };
 }
 
@@ -512,6 +529,9 @@ describe("確かめ用のページ", () => {
     expect(storedRecords(kv, TRIAL_KEYS.history)).toEqual([A, A2, B, C]);
     solveWithHints();
     expect(storedRecords(kv, TRIAL_KEYS.history)).toHaveLength(5);
+    click("recClear");
+    click("recClearYes");
+    expect(storedRecords(kv, TRIAL_KEYS.history)).toEqual([]);
 
     for (const key of [MAIN_KEYS.history, MAIN_KEYS.game, MAIN_KEYS.boards])
       expect(kv.getItem(key)).toBe(before.get(key) ?? null);
@@ -1062,18 +1082,58 @@ describe("盤面の形を書き出し・読み込みで移す", () => {
   });
 });
 
-describe("記録はゲームの中では全部消せない", () => {
-  it("記録を全部消すボタンは無く、消し方を案内する", async () => {
-    await start({ kv: threeRecords() });
+describe("記録を全部消すときは、3 回確かめる", () => {
+  function twoBoards(): MemoryStorage {
+    return withBoards([
+      [play(0, 300000), PA],
+      [play(1, 180000), PB],
+    ]);
+  }
+
+  it("記録を全部消すボタンは一番下にあり、1 回押しただけでは消えない", async () => {
+    const kv = twoBoards();
+    const before = new Map(kv.items);
+    const h = await start({ kv });
     click("recBtn");
-    expect(document.getElementById("recClear")).toBeNull();
-    const buttons = [...document.querySelectorAll("button")].map((b) => b.textContent ?? "");
-    expect(buttons.filter((t) => t.includes("記録を全部消す"))).toEqual([]);
-    // 記録の画面の一番下
-    expect($("recPanel").lastElementChild?.id).toBe("recDeleteHelp");
-    expect(text("recDeleteHelp")).toBe(
-      "記録を全部消したいとき: 間違って消さないよう、このゲームの中では消せません。Chrome の設定の「サイトの設定」で、yu-cha.github.io の保存データを削除すると消えます（yu-cha.github.io のほかのページの保存データも一緒に消えます）。消した記録は戻せないので、先に「記録を書き出す」でファイルにしてください。",
+    expect($("recPanel").lastElementChild?.id).toBe("recClearZone");
+    expect($("recClearConfirm").hidden).toBe(true);
+    click("recClear");
+    expect($("recClearConfirm").hidden).toBe(false);
+    expect(text("recClearConfirm")).toContain(
+      "記録を全部消すと、元に戻せません。消す前に「記録を書き出す」でファイルにしておくと、あとで「記録を読み込む」で戻せます。",
     );
+    expect(h.confirms).toEqual([]);
+    expect(kv.getItem(MAIN_KEYS.history)).toBe(before.get(MAIN_KEYS.history));
+    // やめれば、注意の文も消える
+    click("recClearNo");
+    expect($("recClearConfirm").hidden).toBe(true);
+    expect(kv.getItem(MAIN_KEYS.boards)).toBe(before.get(MAIN_KEYS.boards));
+  });
+
+  it("記録を全部消すと、盤面の形も消える", async () => {
+    const kv = twoBoards();
+    const h = await start({ kv });
+    click("recBtn");
+    click("recClear");
+    click("recClearYes");
+    expect(h.confirms).toEqual([CLEAR_CONFIRM_MESSAGE]);
+    expect(h.confirms).toEqual(["記録を全部消します。消した記録は戻せません。本当に消しますか？"]);
+    expect(kv.getItem(MAIN_KEYS.history)).toBe("[]");
+    expect(kv.getItem(MAIN_KEYS.boards)).toBe("{}");
+    expect(listRows()).toHaveLength(0);
+  });
+
+  it("確かめの窓でキャンセルすれば、記録は消えない", async () => {
+    const kv = twoBoards();
+    const before = new Map(kv.items);
+    await start({ kv, confirmAnswer: false });
+    click("recBtn");
+    click("recClear");
+    click("recClearYes");
+    expect(kv.getItem(MAIN_KEYS.history)).toBe(before.get(MAIN_KEYS.history));
+    expect(kv.getItem(MAIN_KEYS.boards)).toBe(before.get(MAIN_KEYS.boards));
+    expect(listRows()).toHaveLength(2);
+    expect($("recClearConfirm").hidden).toBe(true);
   });
 });
 

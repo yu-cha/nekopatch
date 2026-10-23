@@ -37,6 +37,7 @@ export function createBrowserEnv(win: Window, trial: boolean): AppEnv {
       );
     },
     now,
+    confirm: (message) => win.confirm(message),
   };
 }
 
