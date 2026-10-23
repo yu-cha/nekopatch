@@ -1,6 +1,8 @@
 // 遊びかけの盤面と設定、「クリア ○ 問」の数の保存。
 // 保存の形は、作り直す前（2026-10-21 まで）と同じ JSON の形のまま変えない（ナンの今の状態をそのまま読むため）:
 // {P: {N, reg, cats, level, diff}, st, elapsed, won, solvedCount, hints, autoX, size, diff}
+// 足した欄は、前の版が読み飛ばしても困らないものだけ（判断 c995）:
+// autoXUsed（その問題で「猫の周りに自動で×」を ON のまま猫を置いたか）。true のときだけ書く
 
 import { LEVELS, SIZES } from "./play.ts";
 import type { Puzzle } from "./puzzle.ts";
@@ -18,6 +20,8 @@ export interface SavedGame {
     readonly st: CellState[];
     readonly elapsed: number;
     readonly hints: number;
+    /** その問題で「猫の周りに自動で×」を ON のまま猫を置いたか */
+    readonly autoXUsed: boolean;
   } | null;
   readonly solvedCount: number;
   readonly autoX: boolean;
@@ -34,6 +38,8 @@ export interface GameState {
   readonly solvedCount: number;
   readonly hints: number;
   readonly autoX: boolean;
+  /** その問題で「猫の周りに自動で×」を ON のまま猫を置いたか。無ければ使っていない */
+  readonly autoXUsed?: boolean;
   readonly size: number;
   readonly diff: number;
 }
@@ -94,7 +100,7 @@ export function parseSavedGame(raw: string | null): { game: SavedGame | null; in
     if (puzzle !== null && st !== null) {
       const elapsed = typeof s.elapsed === "number" && s.elapsed >= 0 ? s.elapsed : 0;
       const hints = isIntIn(s.hints, 0, Number.MAX_SAFE_INTEGER) ? s.hints : 0;
-      playing = { puzzle, st, elapsed, hints };
+      playing = { puzzle, st, elapsed, hints, autoXUsed: s.autoXUsed === true };
     } else {
       intact = false;
     }
@@ -112,7 +118,7 @@ export function parseSavedGame(raw: string | null): { game: SavedGame | null; in
   };
 }
 
-/** 作り直す前と同じ形で書く（size と diff は、画面の選択肢の値と同じ文字） */
+/** 作り直す前と同じ形で書く（size と diff は、画面の選択肢の値と同じ文字）。autoXUsed は使ったときだけ足す */
 export function serializeGame(g: GameState): string {
   return JSON.stringify({
     P: g.puzzle,
@@ -124,5 +130,6 @@ export function serializeGame(g: GameState): string {
     autoX: g.autoX,
     size: String(g.size),
     diff: String(g.diff),
+    ...(g.autoXUsed === true ? { autoXUsed: true } : {}),
   });
 }

@@ -3,8 +3,10 @@
 // 数の上限は置かない（ナンとの合意 2026-10-21 の 2）。
 // 遊んだ盤面の形は、記録とは別に、記録の鍵ごとに持つ（判断 490d）。同じ盤面の 2 回目からを「もう一度遊んだ記録」とし、
 // 成績の表と「クリア ○ 問」には数えない（ナンとの合意 2026-10-23）。
+// 備考と「自動×」の印も、記録とは別に、記録の鍵ごとに持つ（notes.ts、判断 c995）。
 
 import { boardId, isBoardCode } from "./board.ts";
+import { mergeNotes, NO_NOTES, type Notes, type RecordNote, readNoteFields } from "./notes.ts";
 import { LEVELS, SIZES } from "./play.ts";
 
 /** 1 回のクリア。at は日時（ミリ秒）、n は盤面の大きさ、d は難しさ、t はタイム（ミリ秒）、h はヒントの回数 */
@@ -21,11 +23,13 @@ export type Boards = ReadonlyMap<string, string>;
 
 const NO_BOARDS: Boards = new Map();
 
-/** クリアの記録と「クリア ○ 問」の数と、遊んだ盤面の形。書き出すファイルの中身 */
+/** クリアの記録と「クリア ○ 問」の数と、遊んだ盤面の形と、備考と印。書き出すファイルの中身 */
 export interface RecordsData {
   readonly solvedCount: number;
   readonly records: readonly ClearRecord[];
   readonly boards: Boards;
+  /** 備考と印。無ければ、どの記録にも無い */
+  readonly notes?: Notes;
 }
 
 function isNonNegativeInteger(x: unknown): x is number {
@@ -287,6 +291,8 @@ export interface BoardRow {
   readonly minHints: number;
   /** 一番新しい記録の日時 */
   readonly lastAt: number;
+  /** その盤面の記録に、1 回でも「難」の印があるか */
+  readonly hard: boolean;
 }
 
 /** 盤面の形がある記録を、盤面ごとにまとめて並べる。filter の大きさ・難しさだけを、上から limit 件 */
@@ -296,6 +302,7 @@ export function boardRows(
   filter: Category | null,
   sort: BoardSort,
   limit: number,
+  notes: Notes = NO_NOTES,
 ): Rows<BoardRow> {
   const acc = new Map<
     string,
@@ -308,11 +315,13 @@ export function boardRows(
       best: number;
       minHints: number;
       lastAt: number;
+      hard: boolean;
     }
   >();
   for (const { record: r, code } of classifyPlays(records, boards)) {
     if (code === null || !inCategory(r, filter)) continue;
     const k = boardGroup(r, code);
+    const hard = notes.size > 0 && notes.get(recordKey(r))?.hard === true;
     const g = acc.get(k);
     if (g === undefined) {
       acc.set(k, {
@@ -324,12 +333,14 @@ export function boardRows(
         best: r.t,
         minHints: r.h,
         lastAt: r.at,
+        hard,
       });
     } else {
       g.count++;
       if (r.t < g.best) g.best = r.t;
       if (r.h < g.minHints) g.minHints = r.h;
       g.lastAt = r.at;
+      if (hard) g.hard = true;
     }
   }
   const order: Record<BoardSort, (a: BoardRow, b: BoardRow) => number> = {
@@ -410,10 +421,16 @@ export function compareWin(
 
 /** 書き出すファイルの種類の印。読み込むときに、ねこパッチの記録のファイルかを見分ける */
 export const RECORDS_FILE_FORMAT = "nekopatch-records";
-/** 版は、前の版が無視すると困る変更のときだけ上げる。盤面の形（記録の欄 b）は、無視されても困らないので 1 のまま（判断 490d） */
+/**
+ * 版は、前の版が無視すると困る変更のときだけ上げる。盤面の形（記録の欄 b）と、備考と印（memo、hard、autoX）は、
+ * 無視されても困らないので 1 のまま（判断 490d、c995）
+ */
 export const RECORDS_FILE_VERSION = 1;
 
-/** 書き出すファイルの中身。記録は 1 件を 1 行にして、人が開いても読めるようにする。盤面の形がある記録には b を付ける */
+/**
+ * 書き出すファイルの中身。記録は 1 件を 1 行にして、人が開いても読めるようにする。
+ * 盤面の形がある記録には b を、備考か印がある記録には memo・hard・autoX のうちあるものを付ける
+ */
 export function exportText(data: RecordsData, exportedAt: Date): string {
   const head = [
     `"format": ${JSON.stringify(RECORDS_FILE_FORMAT)}`,
@@ -421,9 +438,12 @@ export function exportText(data: RecordsData, exportedAt: Date): string {
     `"exportedAt": ${JSON.stringify(exportedAt.toISOString())}`,
     `"solvedCount": ${data.solvedCount}`,
   ];
+  const notes = data.notes ?? NO_NOTES;
   const lines = data.records.map((r) => {
-    const b = data.boards.get(recordKey(r));
-    return `    ${JSON.stringify(b === undefined ? normalize(r) : { ...normalize(r), b })}`;
+    const k = recordKey(r);
+    const b = data.boards.get(k);
+    const note = notes.get(k);
+    return `    ${JSON.stringify({ ...normalize(r), ...(b === undefined ? {} : { b }), ...note })}`;
   });
   const records = lines.length === 0 ? `"records": []` : `"records": [\n${lines.join(",\n")}\n  ]`;
   return `{\n${[...head, records].map((l) => `  ${l}`).join(",\n")}\n}\n`;
@@ -437,11 +457,17 @@ export function exportFileName(date: Date): string {
   return `nekopatch-records-${y}-${m}-${d}.json`;
 }
 
-/** ファイルの記録の 1 行として読めるか。盤面の形（b）は無くてもよいが、あればその大きさの盤面の符号でなければならない */
+/**
+ * ファイルの記録の 1 行として読めるか。盤面の形（b）は無くてもよいが、あればその大きさの盤面の符号でなければならない。
+ * 備考と印（memo は文字列、hard と autoX は真偽値）も、無くてもよいが、あれば読めなければならない
+ */
 function isFileRecord(x: unknown): x is ClearRecord & { readonly b?: string } {
   if (!isClearRecord(x)) return false;
   const b = (x as { b?: unknown }).b;
-  return b === undefined || isBoardCode(x.n, b);
+  return (
+    (b === undefined || isBoardCode(x.n, b)) &&
+    readNoteFields(x as unknown as Record<string, unknown>).ok
+  );
 }
 
 /** 書き出したファイルを読む。ねこパッチの記録のファイルでない、または 1 か所でも読めないところがあれば null */
@@ -459,11 +485,17 @@ export function parseExport(text: string): RecordsData | null {
   if (!Array.isArray(f.records) || !f.records.every(isFileRecord)) return null;
   const records = f.records.map(normalize);
   const boards = new Map<string, string>();
+  const notes = new Map<string, RecordNote>();
   f.records.forEach((r, i) => {
     const rec = records[i];
-    if (r.b !== undefined && rec !== undefined) boards.set(recordKey(rec), r.b);
+    if (rec === undefined) return;
+    const k = recordKey(rec);
+    if (r.b !== undefined) boards.set(k, r.b);
+    const { note } = readNoteFields(r as unknown as Record<string, unknown>);
+    if (note !== null) notes.set(k, note);
   });
-  return { solvedCount: f.solvedCount, records, boards };
+  // 備考の無い前のファイルは、備考の欄を足す前と同じ値に読む
+  return { solvedCount: f.solvedCount, records, boards, ...(notes.size > 0 ? { notes } : {}) };
 }
 
 /**
@@ -471,6 +503,7 @@ export function parseExport(text: string): RecordsData | null {
  * - 同じ記録（recordKey が同じ）は 2 つにしない。added は新しく増えた件数
  * - 記録は日時の順に並べる
  * - 盤面の形は、同じ記録の鍵で足す（今の値があれば変えない）
+ * - 備考と印は、同じ記録の鍵で合わせる（mergeNotes。今のスマホに備考があれば今のまま）
  * - 「クリア ○ 問」は、ファイルの数に、今の記録のうちファイルに無いもの（新しいスマホでだけクリアした分）の数を足す。
  *   もう一度遊んだ記録（読み込んだあとの記録で判断する）は足さない。
  *   今の数より減らさない。同じファイルを何回読み込んでも増えない（ナンの答え 2026-10-22）
@@ -505,6 +538,7 @@ export function importRecords(
       solvedCount: Math.max(current.solvedCount, file.solvedCount + onlyHere),
       records,
       boards,
+      notes: mergeNotes(current.notes ?? NO_NOTES, file.notes ?? NO_NOTES),
     },
     added: fresh.length,
   };

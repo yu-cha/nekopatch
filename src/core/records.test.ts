@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { RecordNote } from "./notes.ts";
 import type { ClearRecord } from "./records.ts";
 import {
   boardRows,
@@ -389,5 +390,96 @@ describe("盤面の形の書き出しと読み込み", () => {
     const once = importRecords(here, file).data;
     expect(once.solvedCount).toBe(801);
     expect(importRecords(once, file).data.solvedCount).toBe(801);
+  });
+});
+
+describe("備考と印の書き出しと読み込み", () => {
+  const notesOf = (entries: [ClearRecord, RecordNote][]) =>
+    new Map(entries.map(([r, n]) => [recordKey(r), n]));
+
+  it("備考か印がある記録は、書き出したファイルの行に memo・hard・autoX が入り、読むと戻る", () => {
+    const data: RecordsData = {
+      solvedCount: 3,
+      records: [A, B, C],
+      boards: boardsOf([[B, XB]]),
+      notes: notesOf([
+        [B, { memo: "左下で迷った", hard: true, autoX: true }],
+        [C, { autoX: true }],
+      ]),
+    };
+    const text = exportText(data, new Date("2026-10-23T01:00:00Z"));
+    expect(parseExport(text)).toEqual(data);
+    expect(JSON.parse(text).version).toBe(1);
+    const lines = text.split("\n").filter((l) => l.includes('"at"'));
+    expect(lines).toEqual([
+      `    ${JSON.stringify(A)},`,
+      `    ${JSON.stringify({ ...B, b: XB, memo: "左下で迷った", hard: true, autoX: true })},`,
+      `    ${JSON.stringify({ ...C, autoX: true })}`,
+    ]);
+  });
+
+  it("備考が文字列でない、印が真偽値でない行があれば、何も読み込まない", () => {
+    for (const extra of [{ memo: 3 }, { memo: null }, { hard: "true" }, { autoX: 1 }]) {
+      const file = {
+        format: "nekopatch-records",
+        version: 1,
+        solvedCount: 1,
+        records: [A, { ...B, ...extra }],
+      };
+      expect(parseExport(JSON.stringify(file))).toBeNull();
+    }
+  });
+
+  it("読み込むと、備考と印を合わせる（今に備考があれば今のまま）", () => {
+    const current: RecordsData = {
+      solvedCount: 2,
+      records: [A, B],
+      boards: new Map(),
+      notes: notesOf([[A, { memo: "今の" }]]),
+    };
+    const file: RecordsData = {
+      solvedCount: 3,
+      records: [A, B, C],
+      boards: new Map(),
+      notes: notesOf([
+        [A, { memo: "古い", hard: true, autoX: true }],
+        [B, { memo: "楽勝" }],
+        [C, { hard: true }],
+      ]),
+    };
+    const { data, added } = importRecords(current, file);
+    expect(added).toBe(1);
+    expect(data.notes).toEqual(
+      notesOf([
+        [A, { memo: "今の", autoX: true }],
+        [B, { memo: "楽勝" }],
+        [C, { hard: true }],
+      ]),
+    );
+  });
+
+  it("盤面ごとの並びは、その盤面の記録に 1 回でも「難」があれば hard", () => {
+    const a1 = rec(1761300000000, 8, 2, 300000);
+    const a2 = rec(1761300060000, 8, 2, 200000);
+    const b1 = rec(1761300120000, 8, 2, 100000);
+    const boards = boardsOf([
+      [a1, XA],
+      [a2, XA],
+      [b1, XB],
+    ]);
+    const notes = notesOf([
+      [a1, { hard: true }],
+      [b1, { memo: "楽勝", autoX: true }],
+    ]);
+    const { rows } = boardRows([a1, a2, b1], boards, null, "slow", 30, notes);
+    expect(rows.map((r) => [r.code, r.hard])).toEqual([
+      [XA, true],
+      [XB, false],
+    ]);
+    // 備考を渡さなければ、どれも hard ではない
+    expect(boardRows([a1, a2, b1], boards, null, "slow", 30).rows.map((r) => r.hard)).toEqual([
+      false,
+      false,
+    ]);
   });
 });

@@ -533,12 +533,13 @@ describe("確かめ用のページ", () => {
     click("recClearYes");
     expect(storedRecords(kv, TRIAL_KEYS.history)).toEqual([]);
 
-    for (const key of [MAIN_KEYS.history, MAIN_KEYS.game, MAIN_KEYS.boards])
+    for (const key of [MAIN_KEYS.history, MAIN_KEYS.game, MAIN_KEYS.boards, MAIN_KEYS.notes])
       expect(kv.getItem(key)).toBe(before.get(key) ?? null);
     expect(kv.keysStartingWith("nekopatch-").filter((k) => !before.has(k))).toEqual([
       TRIAL_KEYS.game,
       TRIAL_KEYS.history,
       TRIAL_KEYS.boards,
+      TRIAL_KEYS.notes,
     ]);
     expect(() => trialStorage(kv).setItem(MAIN_KEYS.history, "[]")).toThrow();
   });
@@ -597,10 +598,10 @@ function listIds(): string[] {
     (tr) => tr.querySelector(".bid")?.textContent ?? "",
   );
 }
-/** 新しい順の一覧の行の、タイムと前回比 */
+/** 新しい順の一覧の行の、タイムと前回比（列は ✎、日時、盤面、タイム、ヒント、遊ぶ） */
 function listTimes(): [string, string][] {
   return [...document.querySelectorAll("#recList tbody tr")].map((tr) => {
-    const cell = tr.querySelectorAll("td")[2];
+    const cell = tr.querySelectorAll("td")[3];
     return [cell?.firstChild?.textContent ?? "", cell?.querySelector(".df")?.textContent ?? ""];
   });
 }
@@ -969,10 +970,10 @@ describe("記録の一覧を並べ替え、絞り込み、さかのぼる", () =
       ["3:00", "−2:00"],
       ["5:00", "—"],
     ]);
-    // 列は、日時、盤面（盤面 ID と何回目か）、タイム（前回比）、ヒント、遊ぶ
+    // 列は、✎、日時、盤面（盤面 ID と何回目か）、タイム（前回比）、ヒント、遊ぶ
     const rows = listRows();
-    expect(rows[0]?.[1]).toContain("2回目");
-    expect(rows[1]?.[1]).not.toContain("回目");
+    expect(rows[0]?.[2]).toContain("2回目");
+    expect(rows[1]?.[2]).not.toContain("回目");
   });
 
   it("盤面ごとの並びには、盤面の形がある記録だけを出す", async () => {

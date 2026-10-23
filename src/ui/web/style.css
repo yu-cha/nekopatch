@@ -522,3 +522,79 @@ button:disabled {
   color: var(--bad);
   border-color: var(--bad);
 }
+/* ---- ここから、2026-10-23 に足した部品（記録に備考を書く） ---- */
+/* 備考を書く欄（クリアの画面と、記録の一覧の ✎ で開く欄） */
+.noteEditor {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+}
+.memoInput {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--body);
+  font-size: 1rem;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1.5px solid var(--line);
+  border-radius: 10px;
+  padding: 6px 10px;
+  /* 本文は文字を選べないようにしてあるので、書く欄だけ選べるようにする */
+  -webkit-user-select: text;
+  user-select: text;
+}
+.memoInput:focus-visible {
+  outline: 3px solid var(--hint);
+  outline-offset: 1px;
+}
+/* 「難」のボタン。押してあると色が付く */
+.hardBtn[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+/* 「難」の印 */
+.hard {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+.rec .sub .hard {
+  margin-left: 6px;
+}
+#win .noteEditor {
+  max-width: 300px;
+}
+#winPrevNote {
+  font-size: 0.9rem;
+}
+/* 記録の一覧の ✎ と、備考の行 */
+.rec #recList th.edit,
+.rec #recList td.edit {
+  padding-right: 0;
+}
+.rec td .noteBtn {
+  padding: 3px 6px;
+  font-size: 0.85rem;
+}
+.rec td .noteBtn[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+.rec #recList tr.noteRow td,
+.rec #recList tr.noteEdit td {
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  padding-top: 0;
+  font-size: 0.85rem;
+}
+/* 備考の行が、上の記録の行と 1 つに見えるよう、上の行の下線を消す */
+.rec #recList tr:has(+ tr.noteRow) td,
+.rec #recList tr:has(+ tr.noteEdit) td {
+  border-bottom: none;
+}

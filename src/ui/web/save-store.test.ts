@@ -52,12 +52,25 @@ describe("保存の場所", () => {
     expect(JSON.parse(kv.getItem(MAIN_KEYS.boards) ?? "")).toEqual({ [key(B)]: code });
   });
 
+  it("一部だけ読める備考と印は、読めた分を使い、元の文字も残す", () => {
+    const raw = JSON.stringify({ [key(B)]: { memo: "左下で迷った" }, [key(A)]: { memo: 3 } });
+    const kv = new MemoryStorage({ [MAIN_KEYS.notes]: raw });
+    const store = new SaveStore(kv, MAIN_KEYS, now);
+    expect(store.loadNotes()).toEqual(new Map([[key(B), { memo: "左下で迷った" }]]));
+    expect(store.unreadableFound).toBe(true);
+    expect(kv.getItem(`${MAIN_KEYS.notes}-unreadable-1761200000000`)).toBe(raw);
+    expect(JSON.parse(kv.getItem(MAIN_KEYS.notes) ?? "")).toEqual({
+      [key(B)]: { memo: "左下で迷った" },
+    });
+  });
+
   it("保存に失敗したら false を返す", () => {
     const kv = new MemoryStorage();
     const store = new SaveStore(kv, MAIN_KEYS, now);
     kv.failWrites = true;
     expect(store.saveRecords([A])).toBe(false);
     expect(store.saveBoards(new Map())).toBe(false);
+    expect(store.saveNotes(new Map())).toBe(false);
   });
 });
 
@@ -68,6 +81,7 @@ describe("確かめ用の保存領域", () => {
     expect(() => trial.setItem(MAIN_KEYS.history, "[]")).toThrow();
     expect(() => trial.setItem(MAIN_KEYS.game, "{}")).toThrow();
     expect(() => trial.setItem(MAIN_KEYS.boards, "{}")).toThrow();
+    expect(() => trial.setItem(MAIN_KEYS.notes, "{}")).toThrow();
     trial.setItem(TRIAL_KEYS.history, "[]");
     expect(kv.keysStartingWith("nekopatch-")).toEqual([TRIAL_KEYS.history]);
     for (const key of Object.values(TRIAL_KEYS)) expect(key.startsWith(TRIAL_PREFIX)).toBe(true);
@@ -88,5 +102,15 @@ describe("確かめ用の保存領域", () => {
     trialStorage(kv);
     expect(kv.getItem(TRIAL_KEYS.boards)).toBe(boards);
     expect(kv.getItem(MAIN_KEYS.boards)).toBe(boards);
+  });
+});
+
+describe("確かめ用の保存領域の備考", () => {
+  it("確かめ用のキーが無ければ、本物の備考と印も写す", () => {
+    const notes = JSON.stringify({ [key(B)]: { memo: "本物" } });
+    const kv = new MemoryStorage({ [MAIN_KEYS.notes]: notes });
+    trialStorage(kv);
+    expect(kv.getItem(TRIAL_KEYS.notes)).toBe(notes);
+    expect(kv.getItem(MAIN_KEYS.notes)).toBe(notes);
   });
 });

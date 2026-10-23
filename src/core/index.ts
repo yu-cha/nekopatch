@@ -2,6 +2,17 @@
 export { boardId, encodeBoard, restorePuzzle } from "./board.ts";
 export type { Random } from "./grid.ts";
 export {
+  changeNote,
+  cleanMemo,
+  hasRemark,
+  MEMO_MAX,
+  type NoteChange,
+  type Notes,
+  parseStoredNotes,
+  type RecordNote,
+  serializeNotes,
+} from "./notes.ts";
+export {
   conflicts,
   formatTime,
   type Hint,
