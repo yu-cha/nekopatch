@@ -573,14 +573,18 @@ button:disabled {
 #winPrevNote {
   font-size: 0.9rem;
 }
-/* 記録の一覧の ✎ と、備考の行 */
+/* 記録の一覧の ✎ と、備考の行。✎ の列のぶん、スマホの幅（360px）でも「遊ぶ」まで見えるよう、すき間を詰める */
 .rec #recList th.edit,
 .rec #recList td.edit {
+  padding-left: 0;
   padding-right: 0;
 }
+.rec #recList td.edit + td {
+  padding-left: 3px;
+}
 .rec td .noteBtn {
-  padding: 3px 6px;
-  font-size: 0.85rem;
+  padding: 2px 4px;
+  font-size: 0.8rem;
 }
 .rec td .noteBtn[aria-expanded="true"] {
   border-color: var(--accent);
