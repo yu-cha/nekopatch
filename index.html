@@ -11,8 +11,8 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&family=Zen+Maru+Gothic:wght@500;700&display=swap">
-  <script type="module" crossorigin src="./assets/index-BZFMaWpC.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-Aupg9IsL.css">
+  <script type="module" crossorigin src="./assets/index-DlId7gbs.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-CFrNYCUw.css">
 </head>
 <body>
 
@@ -45,10 +45,19 @@
     <div id="loading" hidden>問題を作っています…</div>
     <div id="win" hidden><div class="card">
       <h2>クリア！</h2><p id="winText"></p><p id="winCompare"></p>
+      <p id="winVersus" hidden></p>
       <p id="winPrevNote" hidden></p>
       <div class="noteEditor" id="winNote"><button type="button" class="hardBtn" id="winHard" aria-pressed="false">難</button><input type="text" class="memoInput" id="winMemo" maxlength="30" placeholder="ひと言（30 文字まで）" aria-label="備考（ひと言）" autocomplete="off" enterkeyhint="done"><button type="button" id="winSave">保存</button></div>
       <p id="winSaved" role="status" hidden>保存しました</p>
+      <div class="winBtns"><button type="button" id="winShare">この盤面を送る</button></div>
+      <p id="winShareMsg" role="status" hidden></p>
       <div class="winBtns"><button type="button" id="winRetry">もう一度この盤面</button><button type="button" class="primary" id="winNext">次の問題</button></div>
+    </div></div>
+    <div id="shared" hidden><div class="card">
+      <h2>送られてきた盤面</h2><p id="sharedBoard"></p>
+      <p id="sharedSender" hidden></p>
+      <p id="sharedBusy" hidden>遊ぶと、今の遊びかけの盤面はやめになります。</p>
+      <div class="winBtns"><button type="button" id="sharedNo">やめる</button><button type="button" class="primary" id="sharedPlay">この盤面を遊ぶ</button></div>
     </div></div>
   </div>
 
@@ -59,6 +68,7 @@
     <button type="button" id="clearXBtn">×を全部消す</button>
     <button type="button" id="resetBtn">最初から</button>
     <button type="button" id="recBtn">記録</button>
+    <button type="button" id="shareBtn">送る</button>
     <label class="toggle"><input type="checkbox" id="autoX"> 猫の周りに自動で×</label>
   </div>
 
