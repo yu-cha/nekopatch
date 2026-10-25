@@ -1960,9 +1960,10 @@ function clickSend(tr: Element): void {
   if (btn === null) throw new Error("「送る」がありません");
   btn.click();
 }
-/** 新しい順の一覧で、記録 r の行のすぐ下の、もらった盤面の行の文字。無ければ null */
-function receivedOf(r: ClearRecord): string | null {
-  return recordRow(r).nextElementSibling?.querySelector("td.receivedNote")?.textContent ?? null;
+/** 一覧の行 tr の盤面のセルに、もらった盤面の 🎁 があるか */
+function hasGift(tr: Element): boolean {
+  const gift = tr.querySelector("td.board .gift");
+  return gift !== null && gift.textContent === "🎁";
 }
 /** 盤面 A を送ってくれた人の印（3:25・ヒント 0 回）がある記録 r */
 function receivedA(r: ClearRecord): Record<string, string> {
@@ -2053,6 +2054,38 @@ describe("盤面を送る場所", () => {
     const [, body, link] = lastShared(h);
     expect(body).toBe("5:00・ヒント 2 回でクリア。挑戦してみて！");
     expect(link?.endsWith("&t=300&h=2")).toBe(true);
+  });
+
+  it("自動×を使って解いた盤面は、自動×も付けて送る", async () => {
+    const h = await start();
+    setAutoX(true);
+    solveByHand(h, fixedPuzzle(8, 2, 0), 205800);
+    click("winShare");
+    await h.app.whenIdle();
+    const [, body, link] = lastShared(h);
+    expect(body).toBe("3:25・ヒント 0 回・自動×でクリア。挑戦してみて！");
+    expect(link?.endsWith("&t=205&h=0&x=1")).toBe(true);
+  });
+
+  it("記録の一覧の行からは、その記録の自動×も付けて送る", async () => {
+    const r = play(0, 90000, 0);
+    const kv = withBoards([[r, PA]], {
+      [MAIN_KEYS.notes]: JSON.stringify({ [recordKey(r)]: { autoX: true } }),
+    });
+    const h = await start({ kv });
+    click("recBtn");
+    clickSend(recordRow(r));
+    await h.app.whenIdle();
+    const [, body, link] = lastShared(h);
+    expect(body).toBe("1:30・ヒント 0 回・自動×でクリア。挑戦してみて！");
+    expect(link?.endsWith("&t=90&h=0&x=1")).toBe(true);
+    // 盤面ごとの並びからは、初回の記録の自動×を付ける
+    choose("recSort", "slow");
+    const [row] = document.querySelectorAll("#recList tbody tr");
+    if (row === undefined) throw new Error("行がありません");
+    clickSend(row);
+    await h.app.whenIdle();
+    expect(lastShared(h)[2]?.endsWith("&t=90&h=0&x=1")).toBe(true);
   });
 
   it("盤面の形が無い記録の行には、送るが出ない", async () => {
@@ -2229,6 +2262,14 @@ describe("もらった盤面をクリアしたら、送ってくれた人と比�
     expect(await versusAfter(205900)).toBe("送ってくれた人（3:25）と同じタイム！");
   });
 
+  it("自動×の付いたリンクでは、送ってくれた人の自動×も出す", async () => {
+    const h = await start({ link: `${linkOf(PA)}&x=1` });
+    expect(text("sharedSender")).toBe("送ってくれた人: 3:25・ヒント 0 回・自動×");
+    playShared();
+    solveByHand(h, PA, 175000);
+    expect(text("winVersus")).toBe("送ってくれた人（3:25・自動×）より 0:30 速い！");
+  });
+
   it("タイムの無いリンクの盤面は、送ってくれた人と比べない", async () => {
     expect(await versusAfter(175000, null)).toBeNull();
   });
@@ -2259,8 +2300,8 @@ describe("もらった盤面をクリアしたら、送ってくれた人と比�
     const [first, second] = storedRecords(kv);
     if (first === undefined || second === undefined) throw new Error("記録が 2 件ありません");
     click("recBtn");
-    expect(receivedOf(first)).not.toBeNull();
-    expect(receivedOf(second)).toBeNull();
+    expect(hasGift(recordRow(first))).toBe(true);
+    expect(hasGift(recordRow(second))).toBe(false);
   });
 });
 
@@ -2294,27 +2335,44 @@ describe("もらった盤面の記録は、今までと同じ決まりで数え�
   });
 });
 
-describe("記録の一覧に、もらった盤面と出す", () => {
-  it("もらった盤面の記録の行に、送ってくれた人のタイムを出す", async () => {
+describe("記録の一覧に、もらった盤面の印を出す", () => {
+  it("もらった盤面の記録の行に、🎁 を出す", async () => {
     const kv = new MemoryStorage();
     const h = await start({ kv, link: linkOf(PA) });
     playShared();
     solveByHand(h, PA, 295000);
-    const [r] = storedRecords(kv);
-    if (r === undefined) throw new Error("記録がありません");
+    click("winNext");
+    await h.app.whenIdle();
+    solveTaking(h, 65000);
+    const [r, own] = storedRecords(kv);
+    if (r === undefined || own === undefined) throw new Error("記録が 2 件ありません");
     click("recBtn");
-    expect(receivedOf(r)).toBe("もらった盤面（送ってくれた人 3:25・ヒント 0 回）");
+    expect(hasGift(recordRow(r))).toBe(true);
+    expect(recordRow(r).querySelector(".gift")?.getAttribute("aria-label")).toBe("もらった盤面");
+    expect(hasGift(recordRow(own))).toBe(false);
+    // 送ってくれた人のタイムは一覧に出さず、記録の行の下に行も増えない
+    expect($("recList").textContent).not.toContain("3:25");
+    expect(document.querySelectorAll("#recList tbody tr")).toHaveLength(2);
   });
 
-  it("タイムの無いリンクの盤面の行には、もらった盤面とだけ出す", async () => {
-    const kv = new MemoryStorage();
-    const h = await start({ kv, link: linkOf(PA, null) });
+  it("盤面ごとの並びでは、1 回でももらった盤面に 🎁 を出す", async () => {
+    const b1 = play(0, 100000);
+    const kv = withBoards([[b1, PB]]);
+    const h = await start({ kv, link: linkOf(PA) });
     playShared();
-    solveByHand(h, PA, 95000);
-    const [r] = storedRecords(kv);
-    if (r === undefined) throw new Error("記録がありません");
+    solveByHand(h, PA, 200000);
+    click("winRetry");
+    solveByHand(h, PA, 150000);
     click("recBtn");
-    expect(receivedOf(r)).toBe("もらった盤面");
+    choose("recSort", "slow");
+    const rows = [...document.querySelectorAll("#recList tbody tr")];
+    const rowOf = (p: Puzzle) =>
+      rows.find((tr) => tr.querySelector(".bid")?.textContent === idOf(p));
+    const rowA = rowOf(PA);
+    const rowB = rowOf(PB);
+    if (rowA === undefined || rowB === undefined) throw new Error("盤面の行がありません");
+    expect(hasGift(rowA)).toBe(true);
+    expect(hasGift(rowB)).toBe(false);
   });
 });
 
@@ -2341,7 +2399,7 @@ describe("もらった盤面の印は、記録とは別のキーに置く", () =
     expect(kv.getItem(`${MAIN_KEYS.received}-unreadable-${TODAY}`)).toBe('{"1":');
     click("recBtn");
     expect(listRows()).toHaveLength(1);
-    expect(document.querySelector("#recList td.receivedNote")).toBeNull();
+    expect(document.querySelector("#recList .gift")).toBeNull();
     expect($("recUnreadable").hidden).toBe(false);
     expect(text("recUnreadable")).toBe(
       "読めない記録がありました。消さずに別の場所に残してあります。くろに相談してください。",
@@ -2391,12 +2449,22 @@ describe("もらった盤面の印を、書き出し・読み込みで移し、�
       format: "nekopatch-records",
       version: 1,
       solvedCount: 1,
-      records: [{ ...r1, b: codeOf(PA), received: { senderTime: 205000, senderHints: 0 } }],
+      records: [
+        {
+          ...r1,
+          b: codeOf(PA),
+          received: { senderTime: 205000, senderHints: 0, senderAutoX: true },
+        },
+      ],
     });
-    const h = await start();
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
     click("recBtn");
     await importFile(h, file);
-    expect(receivedOf(r1)).toBe("もらった盤面（送ってくれた人 3:25・ヒント 0 回）");
+    expect(hasGift(recordRow(r1))).toBe(true);
+    expect(storedReceived(kv)).toEqual({
+      [recordKey(r1)]: { senderTime: 205000, senderHints: 0, senderAutoX: true },
+    });
   });
 
   it("もらった盤面の印が読めないファイルは、何も読み込まない", async () => {
@@ -2442,7 +2510,7 @@ describe("今までの記録を引き継ぐ（もらった盤面の欄）", () =
     expect(Object.keys(saved)).toEqual([...OLD_FIELDS, "received"]);
     expect(saved.received).toEqual({ senderTime: 205000, senderHints: 0 });
     expect(parseSavedGame(raw).game?.playing?.received).toEqual({
-      sender: { time: 205000, hints: 0 },
+      sender: { time: 205000, hints: 0, autoX: false },
     });
     // 前の版は、足した欄を読み飛ばす。足した欄を除いた値も、同じ遊びかけの盤面として読める
     const { received: _, ...old } = saved;

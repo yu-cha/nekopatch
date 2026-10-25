@@ -294,9 +294,10 @@ export interface BoardRow {
   readonly code: string;
   readonly id: string;
   readonly count: number;
-  /** 初回のタイムとヒントの回数 */
+  /** 初回のタイムとヒントの回数と、初回に「自動×」を使って解いたか（送るときに付ける） */
   readonly first: number;
   readonly firstHints: number;
+  readonly firstAutoX: boolean;
   /** 一番速いタイム */
   readonly best: number;
   /** 一番少ないヒントの回数 */
@@ -305,9 +306,14 @@ export interface BoardRow {
   readonly lastAt: number;
   /** その盤面の記録に、1 回でも「難」の印があるか */
   readonly hard: boolean;
+  /** その盤面の記録に、1 回でももらった盤面の記録があるか */
+  readonly received: boolean;
 }
 
-/** 盤面の形がある記録を、盤面ごとにまとめて並べる。filter の大きさ・難しさだけを、上から limit 件 */
+/**
+ * 盤面の形がある記録を、盤面ごとにまとめて並べる。filter の大きさ・難しさだけを、上から limit 件。
+ * notes は「難」と初回の「自動×」、received はもらった盤面かを見るのに使う
+ */
 export function boardRows(
   records: readonly ClearRecord[],
   boards: Boards,
@@ -315,6 +321,7 @@ export function boardRows(
   sort: BoardSort,
   limit: number,
   notes: Notes = NO_NOTES,
+  received: ReceivedBoards = NO_RECEIVED,
 ): Rows<BoardRow> {
   const acc = new Map<
     string,
@@ -325,16 +332,20 @@ export function boardRows(
       count: number;
       first: number;
       firstHints: number;
+      firstAutoX: boolean;
       best: number;
       minHints: number;
       lastAt: number;
       hard: boolean;
+      received: boolean;
     }
   >();
   for (const { record: r, code } of classifyPlays(records, boards)) {
     if (code === null || !inCategory(r, filter)) continue;
     const k = boardGroup(r, code);
-    const hard = notes.size > 0 && notes.get(recordKey(r))?.hard === true;
+    const note = notes.size > 0 ? notes.get(recordKey(r)) : undefined;
+    const hard = note?.hard === true;
+    const gift = received.size > 0 && received.has(recordKey(r));
     const g = acc.get(k);
     if (g === undefined) {
       acc.set(k, {
@@ -344,10 +355,12 @@ export function boardRows(
         count: 1,
         first: r.t,
         firstHints: r.h,
+        firstAutoX: note?.autoX === true,
         best: r.t,
         minHints: r.h,
         lastAt: r.at,
         hard,
+        received: gift,
       });
     } else {
       g.count++;
@@ -355,6 +368,7 @@ export function boardRows(
       if (r.h < g.minHints) g.minHints = r.h;
       g.lastAt = r.at;
       if (hard) g.hard = true;
+      if (gift) g.received = true;
     }
   }
   const order: Record<BoardSort, (a: BoardRow, b: BoardRow) => number> = {

@@ -643,3 +643,7 @@ button:disabled {
 .rec td.acts button + button {
   margin-top: 3px;
 }
+/* もらった盤面の印（盤面 ID の横） */
+.rec .sub .gift {
+  margin-left: 4px;
+}

@@ -1,17 +1,18 @@
 // 盤面をほかの人に送るリンクと文（ナンとの合意 2026-10-25、判断 73b0）。
-// リンクの # の後ろに、盤面の大きさ・難しさ・符号と、送る人のタイム（秒）・ヒントの回数を入れる。
+// リンクの # の後ろに、盤面の大きさ・難しさ・符号と、送る人のタイム（秒）・ヒントの回数・自動×を使ったかを入れる。
 // # の後ろはブラウザがサーバーに送らないので、ページの中だけで読む。
-// もらった盤面の印（送った人のタイムとヒントの回数）は、記録とは別に、記録の鍵ごとに持つ（判断 73b0）。
+// もらった盤面の印（送った人のタイムとヒントの回数と自動×）は、記録とは別に、記録の鍵ごとに持つ（判断 73b0）。
 
 import { boardId, restorePuzzle } from "./board.ts";
 import { isRecordKey } from "./notes.ts";
 import { formatTime, LEVEL_NAMES, LEVELS, SIZES } from "./play.ts";
 import type { Puzzle } from "./puzzle.ts";
 
-/** 送る人のタイム（ミリ秒）とヒントの回数 */
+/** 送る人のタイム（ミリ秒）とヒントの回数と、「猫の周りに自動で×」を使って解いたか */
 export interface SenderScore {
   readonly time: number;
   readonly hints: number;
+  readonly autoX: boolean;
 }
 
 /** 送る盤面。d は選んだ難しさ（記録の d と同じ） */
@@ -41,14 +42,16 @@ export const OPEN_EXTERNAL = "openExternalBrowser=1";
 const MAX_SECONDS = 359999;
 const MAX_HINTS = 9999;
 
-/** 送るリンクの # の後ろ。タイムは秒に切り捨てる（画面の「3:25」と同じ） */
+/** 送るリンクの # の後ろ。タイムは秒に切り捨てる（画面の「3:25」と同じ）。自動×を使って解いたときだけ x=1 を足す */
 export function shareFragment(b: SharedBoard): string {
   const parts = [`n=${b.n}`, `d=${b.d}`, `b=${b.code}`];
-  if (b.sender !== null)
+  if (b.sender !== null) {
     parts.push(
       `t=${Math.min(MAX_SECONDS, Math.floor(b.sender.time / 1000))}`,
       `h=${Math.min(MAX_HINTS, b.sender.hints)}`,
     );
+    if (b.sender.autoX) parts.push("x=1");
+  }
   return parts.join("&");
 }
 
@@ -62,9 +65,9 @@ export function boardLabel(n: number, d: number): string {
   return `${n}×${n}・${LEVEL_NAMES[d] ?? ""}`;
 }
 
-/** 送るタイムとヒントの回数（「3:25・ヒント 0 回」） */
+/** 送るタイムとヒントの回数と自動×（「3:25・ヒント 0 回」「3:25・ヒント 0 回・自動×」） */
 export function scoreLabel(s: SenderScore): string {
-  return `${formatTime(s.time)}・ヒント ${s.hints} 回`;
+  return `${formatTime(s.time)}・ヒント ${s.hints} 回${s.autoX ? "・自動×" : ""}`;
 }
 
 /** スマホの共有の画面に渡す、3 行の文。日時や備考は入れない */
@@ -82,7 +85,7 @@ function readCount(s: string | undefined): number | null {
 
 /**
  * 送るリンクの # の後ろを読む。盤面の大きさ・難しさが選べる値で、盤面の符号から答えがちょうど 1 つの問題を作り直せて、
- * タイムとヒントの回数が両方あるか両方無いときだけ、盤面と作り直した問題を返す。読めなければ null。
+ * タイムとヒントの回数が両方あるか両方無く、自動×の印（x=1）がタイムと一緒のときだけ、盤面と作り直した問題を返す。読めなければ null。
  * 知らない名前の欄は無視する（あとで欄を足しても、この版で開けるように）
  */
 export function parseShareFragment(
@@ -110,12 +113,14 @@ export function parseShareFragment(
     return null;
   const t = fields.get("t");
   const h = fields.get("h");
+  const x = fields.get("x");
+  if (x !== undefined && x !== "1") return null;
   let sender: SenderScore | null = null;
-  if (t !== undefined || h !== undefined) {
+  if (t !== undefined || h !== undefined || x !== undefined) {
     const sec = readCount(t);
     const hints = readCount(h);
     if (sec === null || hints === null || sec > MAX_SECONDS || hints > MAX_HINTS) return null;
-    sender = { time: sec * 1000, hints };
+    sender = { time: sec * 1000, hints, autoX: x === "1" };
   }
   const puzzle = restorePuzzle(n, code);
   if (puzzle === null) return null;
@@ -132,20 +137,32 @@ function isNonNegativeInteger(x: unknown): x is number {
 }
 
 /**
- * 保存やファイルの、もらった盤面の印を読む（{senderTime, senderHints} か、タイムの無いリンクなら {}）。
+ * 保存やファイルの、もらった盤面の印を読む（{senderTime, senderHints}、自動×を使っていれば senderAutoX: true も。
+ * タイムの無いリンクなら {}）。
  * 読めなければ null。知らない欄は無視する
  */
 export function readReceived(x: unknown): Received | null {
   if (typeof x !== "object" || x === null || Array.isArray(x)) return null;
-  const { senderTime, senderHints } = x as Record<string, unknown>;
-  if (senderTime === undefined && senderHints === undefined) return { sender: null };
+  const { senderTime, senderHints, senderAutoX } = x as Record<string, unknown>;
+  if (senderTime === undefined && senderHints === undefined && senderAutoX === undefined)
+    return { sender: null };
   if (!isNonNegativeInteger(senderTime) || !isNonNegativeInteger(senderHints)) return null;
-  return { sender: { time: senderTime, hints: senderHints } };
+  if (senderAutoX !== undefined && typeof senderAutoX !== "boolean") return null;
+  return { sender: { time: senderTime, hints: senderHints, autoX: senderAutoX === true } };
 }
 
 /** 保存やファイルに書く形 */
-export function receivedJson(r: Received): { senderTime?: number; senderHints?: number } {
-  return r.sender === null ? {} : { senderTime: r.sender.time, senderHints: r.sender.hints };
+export function receivedJson(r: Received): {
+  senderTime?: number;
+  senderHints?: number;
+  senderAutoX?: true;
+} {
+  if (r.sender === null) return {};
+  return {
+    senderTime: r.sender.time,
+    senderHints: r.sender.hints,
+    ...(r.sender.autoX ? { senderAutoX: true } : {}),
+  };
 }
 
 /**

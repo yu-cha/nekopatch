@@ -126,7 +126,7 @@ describe("もらった盤面の印の保存", () => {
     const kv = new MemoryStorage({ [MAIN_KEYS.received]: raw });
     const store = new SaveStore(kv, MAIN_KEYS, now);
     expect(store.loadReceived()).toEqual(
-      new Map([[key(B), { sender: { time: 205000, hints: 0 } }]]),
+      new Map([[key(B), { sender: { time: 205000, hints: 0, autoX: false } }]]),
     );
     expect(store.unreadableFound).toBe(true);
     expect(kv.getItem(`${MAIN_KEYS.received}-unreadable-1761200000000`)).toBe(raw);

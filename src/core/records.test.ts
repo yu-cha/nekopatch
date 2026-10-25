@@ -495,7 +495,7 @@ describe("もらった盤面の印の書き出しと読み込み", () => {
       records: [A, B, C],
       boards: boardsOf([[B, XB]]),
       received: receivedOf([
-        [B, { sender: { time: 205000, hints: 0 } }],
+        [B, { sender: { time: 205000, hints: 0, autoX: false } }],
         [C, { sender: null }],
       ]),
     };
@@ -533,20 +533,20 @@ describe("もらった盤面の印の書き出しと読み込み", () => {
       solvedCount: 2,
       records: [A, B],
       boards: new Map(),
-      received: receivedOf([[A, { sender: { time: 1000, hints: 1 } }]]),
+      received: receivedOf([[A, { sender: { time: 1000, hints: 1, autoX: false } }]]),
     };
     const file: RecordsData = {
       solvedCount: 3,
       records: [A, B, C],
       boards: new Map(),
       received: receivedOf([
-        [A, { sender: { time: 9000, hints: 9 } }],
+        [A, { sender: { time: 9000, hints: 9, autoX: false } }],
         [C, { sender: null }],
       ]),
     };
     expect(importRecords(current, file).data.received).toEqual(
       receivedOf([
-        [A, { sender: { time: 1000, hints: 1 } }],
+        [A, { sender: { time: 1000, hints: 1, autoX: false } }],
         [C, { sender: null }],
       ]),
     );

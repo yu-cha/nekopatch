@@ -195,7 +195,11 @@ export function startApp(doc: Document, env: AppEnv): App {
   /** リンクの「この盤面を遊ぶ」で始めた問題なら、もらった盤面の印。そうでなければ null */
   let received: Received | null = null;
   /** いまクリアの画面に出している記録と盤面の符号（「この盤面を送る」で使う） */
-  let lastWin: { readonly rec: ClearRecord; readonly code: string } | null = null;
+  let lastWin: {
+    readonly rec: ClearRecord;
+    readonly code: string;
+    readonly autoX: boolean;
+  } | null = null;
   /** 送られてきた盤面の案内に出している盤面と、作り直した問題 */
   let offer: { readonly board: SharedBoard; readonly puzzle: Puzzle } | null = null;
   /** クリアの画面の書く欄が備考を書く記録の鍵。クリアの画面を出していなければ null */
@@ -439,7 +443,7 @@ export function startApp(doc: Document, env: AppEnv): App {
     el.hidden = sender === null;
     if (sender === null) return;
     const df = versusSender(elapsed, sender);
-    const who = `送ってくれた人（${fmt(sender.time)}）`;
+    const who = `送ってくれた人（${fmt(sender.time)}${sender.autoX ? "・自動×" : ""}）`;
     // 入れるのは数から作った文だけ
     el.innerHTML =
       df < 0
@@ -477,7 +481,7 @@ export function startApp(doc: Document, env: AppEnv): App {
     const recorded = env.store.saveRecords(records);
     markSaved(boardSaved && noteSaved && receivedSaved && recorded);
     winKey = key;
-    lastWin = { rec, code };
+    lastWin = { rec, code, autoX: autoXUsed };
     $("winShareMsg").hidden = true;
     showVersusSender(received?.sender ?? null);
     winMemo.value = "";
@@ -683,12 +687,12 @@ export function startApp(doc: Document, env: AppEnv): App {
     el.textContent = text ?? "";
     el.hidden = text === null;
   }
-  /** いまクリアした記録の、タイムとヒントの回数を付けて送る */
+  /** いまクリアした記録の、タイムとヒントの回数と自動×を付けて送る */
   function sendLastWin(): void {
     if (lastWin === null) return;
-    const { rec, code } = lastWin;
+    const { rec, code, autoX: ax } = lastWin;
     sendBoard(
-      { n: rec.n, d: rec.d, code, sender: { time: rec.t, hints: rec.h } },
+      { n: rec.n, d: rec.d, code, sender: { time: rec.t, hints: rec.h, autoX: ax } },
       showWinShareMessage,
     );
   }
@@ -885,11 +889,22 @@ export function startApp(doc: Document, env: AppEnv): App {
     renderList();
   }
   // 記録の一覧は、スマホの幅（360px ほど）でも「遊ぶ」まで見えるよう、セルを 2 段にして列を減らす
-  /** 盤面のセル（大きさ・難しさと、下の段に盤面 ID と何回目か。盤面ごとの並びでは「難」も） */
-  function boardCell(n: number, d: number, id: string | null, nth: number, hard = false): string {
+  /**
+   * 盤面のセル（大きさ・難しさと、下の段に盤面 ID と何回目か。盤面ごとの並びでは「難」も）。
+   * もらった盤面には 🎁 を付ける（ナンとの合意 2026-10-25。送ってくれた人のタイムは、一覧には出さない）
+   */
+  function boardCell(
+    n: number,
+    d: number,
+    id: string | null,
+    nth: number,
+    hard = false,
+    gift = false,
+  ): string {
     const times = nth > 1 ? `<span class="nth">${nth}回目</span>` : "";
     const mark = hard ? '<span class="hard">難</span>' : "";
-    return `<td class="board">${n}×${n} ${LEVEL_NAMES[d] ?? ""}<span class="sub"><span class="bid">${id ?? "—"}</span>${times}${mark}</span></td>`;
+    const present = gift ? '<span class="gift" role="img" aria-label="もらった盤面">🎁</span>' : "";
+    return `<td class="board">${n}×${n} ${LEVEL_NAMES[d] ?? ""}<span class="sub"><span class="bid">${id ?? "—"}</span>${times}${mark}${present}</span></td>`;
   }
   /**
    * 新しい順の 1 行のあとに足す行。✎ で開いた記録には書く欄、備考のある記録には備考の行。
@@ -902,22 +917,11 @@ export function startApp(doc: Document, env: AppEnv): App {
       ? `<tr class="noteRow"><td></td><td colspan="5" class="remark" data-k="${key}"></td></tr>`
       : "";
   }
-  /** 新しい順の 1 行のあとに足す、もらった盤面の行。文は表を作ったあとで入れる（fillNotes） */
-  function receivedRow(key: string): string {
-    return receivedBoards.has(key)
-      ? `<tr class="noteRow"><td></td><td colspan="5" class="receivedNote" data-k="${key}"></td></tr>`
-      : "";
-  }
-  /** 表を作ったあとで、備考の行に「難」と文を、もらった盤面の行に送ってくれた人のタイムを、書く欄に今の文を入れる */
+  /** 表を作ったあとで、備考の行に「難」と文を、書く欄に今の文を入れる */
   function fillNotes(): void {
     for (const el of recList.querySelectorAll<HTMLElement>("td.remark")) {
       const note = notes.get(el.dataset.k ?? "");
       if (note !== undefined) appendRemark(el, note);
-    }
-    for (const el of recList.querySelectorAll<HTMLElement>("td.receivedNote")) {
-      const sender = receivedBoards.get(el.dataset.k ?? "")?.sender ?? null;
-      el.textContent =
-        sender === null ? "もらった盤面" : `もらった盤面（送ってくれた人 ${scoreLabel(sender)}）`;
     }
     const input = editorInput();
     if (input === null) editingKey = null;
@@ -927,13 +931,21 @@ export function startApp(doc: Document, env: AppEnv): App {
     }
   }
   /**
-   * 「遊ぶ」と「送る」のセル。スマホの幅に収まるよう、2 つを縦に並べる。t と h は、送るときに付けるタイムとヒントの回数。
+   * 「遊ぶ」と「送る」のセル。スマホの幅に収まるよう、2 つを縦に並べる。
+   * t、h、x は、送るときに付けるタイムとヒントの回数と、自動×を使って解いたか。
    * 符号は base64url の文字だけなので、属性にそのまま書ける
    */
-  function actsCell(n: number, d: number, code: string | null, t: number, h: number): string {
+  function actsCell(
+    n: number,
+    d: number,
+    code: string | null,
+    t: number,
+    h: number,
+    x: boolean,
+  ): string {
     return code === null
       ? "<td></td>"
-      : `<td class="acts"><button type="button" class="play" data-n="${n}" data-d="${d}" data-b="${code}">遊ぶ</button><button type="button" class="send" data-n="${n}" data-d="${d}" data-b="${code}" data-t="${t}" data-h="${h}">送る</button></td>`;
+      : `<td class="acts"><button type="button" class="play" data-n="${n}" data-d="${d}" data-b="${code}">遊ぶ</button><button type="button" class="send" data-n="${n}" data-d="${d}" data-b="${code}" data-t="${t}" data-h="${h}" data-x="${x ? 1 : 0}">送る</button></td>`;
   }
   /** 記録の一覧。新しい順は 1 回 1 行で、同じ盤面の前回（初めての盤面は、同じ盤面・難しさの前回）との比べを付ける */
   function renderList(): void {
@@ -962,16 +974,16 @@ export function startApp(doc: Document, env: AppEnv): App {
                 ? `<span class="slower">+${fmt(df)}</span>`
                 : "±0:00";
         const ax = note?.autoX === true ? '<span class="sub">自動×</span>' : "";
-        l += `<tr><td class="edit"><button type="button" class="noteBtn" data-k="${k}" aria-label="備考を書く" aria-expanded="${editingKey === k}">✎</button></td><td>${ds}</td>${boardCell(h.n, h.d, id, nth)}<td>${fmt(h.t)}<span class="sub df">${c}</span></td><td>${h.h}${ax}</td>${actsCell(h.n, h.d, code, h.t, h.h)}</tr>${receivedRow(k)}${noteRow(k, note)}`;
+        l += `<tr><td class="edit"><button type="button" class="noteBtn" data-k="${k}" aria-label="備考を書く" aria-expanded="${editingKey === k}">✎</button></td><td>${ds}</td>${boardCell(h.n, h.d, id, nth, false, receivedBoards.has(k))}<td>${fmt(h.t)}<span class="sub df">${c}</span></td><td>${h.h}${ax}</td>${actsCell(h.n, h.d, code, h.t, h.h, note?.autoX === true)}</tr>${noteRow(k, note)}`;
       }
     } else {
-      const res = boardRows(records, boards, filter, sort, listLimit, notes);
+      const res = boardRows(records, boards, filter, sort, listLimit, notes, receivedBoards);
       ({ more } = res);
       count = res.rows.length;
       l =
         '<table><thead><tr><th class="board">盤面</th><th>初回</th><th>ベスト</th><th>回数</th><th>最少<br>ヒント</th><th></th></tr></thead><tbody>';
       for (const g of res.rows)
-        l += `<tr>${boardCell(g.n, g.d, g.id, 1, g.hard)}<td>${fmt(g.first)}</td><td>${fmt(g.best)}</td><td>${g.count}</td><td>${g.minHints}</td>${actsCell(g.n, g.d, g.code, g.first, g.firstHints)}</tr>`;
+        l += `<tr>${boardCell(g.n, g.d, g.id, 1, g.hard, g.received)}<td>${fmt(g.first)}</td><td>${fmt(g.best)}</td><td>${g.count}</td><td>${g.minHints}</td>${actsCell(g.n, g.d, g.code, g.first, g.firstHints, g.firstAutoX)}</tr>`;
     }
     $("recList").innerHTML =
       count > 0
@@ -1035,18 +1047,18 @@ export function startApp(doc: Document, env: AppEnv): App {
     }
     replay(p, d);
   });
-  // 記録の一覧の「送る」。新しい順はその回の、盤面ごとの並びは初回のタイムとヒントの回数を付ける（行に書いてある）
+  // 記録の一覧の「送る」。新しい順はその回の、盤面ごとの並びは初回のタイムとヒントの回数と自動×を付ける（行に書いてある）
   $("recList").addEventListener("click", (e) => {
     const btn = (e.target as Element | null)?.closest<HTMLButtonElement>("button.send");
     if (btn === null || btn === undefined) return;
     disarmPlay();
-    const { n, d, b, t, h } = btn.dataset;
+    const { n, d, b, t, h, x } = btn.dataset;
     sendBoard(
       {
         n: Number(n),
         d: Number(d),
         code: b ?? "",
-        sender: { time: Number(t), hints: Number(h) },
+        sender: { time: Number(t), hints: Number(h), autoX: x === "1" },
       },
       showPlayMessage,
     );
