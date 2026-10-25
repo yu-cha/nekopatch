@@ -25,6 +25,7 @@
 
 - GitHub Pages は `gh-pages` ブランチの最上位を配信する。`main` は配信されない。GitHub Actions は使わない（f92f）。
 - `main` に取り込んだら、必ず `nix develop -c just deploy` を実行する（`origin/main` をビルドして `gh-pages` に積んで送る）。数分で反映される。
+  - 実行するのは、依存を入れた worktree の中（`wt start nekopatch chore/deploy-<名前>` のあと `nix develop -c npm ci`。終わったら `wt drop`）。送る前のフックが、実行した場所で `just check` を動かすため。メインの作業ツリーには `node_modules` が無く、2026-10-25 に検査が止まって送れなかった。
 - ナンに確かめてもらう版は、worktree で `nix develop -c just deploy-trial` を実行して置く（https://yu-cha.github.io/nekopatch/preview/ ）。ナンのスマホは VM（192.168.56.10）に届かないので、`just preview` では確かめてもらえない。
 - 戻すときは、`gh-pages` を 1 つ前のコミットに戻して送る。
 
