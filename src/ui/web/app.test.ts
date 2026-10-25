@@ -20,11 +20,14 @@ import {
   CLEAR_CONFIRM_MESSAGE,
   IMPORT_MESSAGES,
   PLAY_MESSAGES,
+  SHARE_MESSAGES,
+  SHARED_MESSAGES,
   startApp,
   WIN_SAVED_MESSAGES,
 } from "./app.ts";
 import { persistMessage } from "./persistence.ts";
 import { MAIN_KEYS, SaveStore, TRIAL_KEYS, trialStorage } from "./save-store.ts";
+import type { ShareResult } from "./share.ts";
 import { MemoryStorage, seededRandom } from "./test-support.ts";
 
 const html = readFileSync(join(import.meta.dirname, "../../../index.html"), "utf8");
@@ -56,6 +59,10 @@ interface Harness {
   readonly notifyOtherTab: () => void;
   /** ブラウザの確かめの窓に出した文 */
   readonly confirms: string[];
+  /** 共有の画面に渡した文 */
+  readonly shares: string[];
+  /** 開いているページの # の後ろが、送られてきた盤面のリンクに変わった（hashchange） */
+  readonly openLink: (fragment: string) => Promise<void>;
 }
 
 interface Options {
@@ -65,7 +72,15 @@ interface Options {
   readonly confirmAnswer?: boolean;
   /** 消さないよう頼む機能。none なら機能が無い */
   readonly persist?: { readonly persisted: boolean; readonly grant: boolean } | "none";
+  /** 開いたときのアドレスの # の後ろ（送られてきた盤面のリンク）。無ければリンクでない */
+  readonly link?: string;
+  /** 共有の画面に渡したときの結果（既定は shared） */
+  readonly shareResult?: ShareResult;
 }
+
+/** 本物のページのアドレス（確かめ用のページは preview/） */
+const PAGE = "https://yu-cha.github.io/nekopatch/";
+const TRIAL_PAGE = "https://yu-cha.github.io/nekopatch/preview/";
 
 const running: App[] = [];
 
@@ -79,6 +94,9 @@ async function start(options: Options = {}): Promise<Harness> {
   let granted = persist !== "none" && persist.persisted;
   let storageListener = () => {};
   const confirms: string[] = [];
+  const shares: string[] = [];
+  let link: string | null = options.link ?? null;
+  let linkListener = () => {};
   // 問題を作るたびに別の盤面にする（同じ盤面ばかりだと、もう一度遊んだ記録になる）
   let made = 0;
   const env: AppEnv = {
@@ -109,6 +127,19 @@ async function start(options: Options = {}): Promise<Harness> {
       confirms.push(message);
       return options.confirmAnswer ?? true;
     },
+    pageUrl: options.trial ? TRIAL_PAGE : PAGE,
+    takeLink: () => {
+      const l = link;
+      link = null;
+      return l;
+    },
+    onLinkChange: (listener) => {
+      linkListener = listener;
+    },
+    share: async (t) => {
+      shares.push(t);
+      return options.shareResult ?? "shared";
+    },
   };
   const app = startApp(document, env);
   running.push(app);
@@ -121,6 +152,12 @@ async function start(options: Options = {}): Promise<Harness> {
     clock,
     notifyOtherTab: () => storageListener(),
     confirms,
+    shares,
+    openLink: async (fragment) => {
+      link = fragment;
+      linkListener();
+      await app.whenIdle();
+    },
   };
 }
 
@@ -536,13 +573,14 @@ describe("確かめ用のページ", () => {
     click("recClearYes");
     expect(storedRecords(kv, TRIAL_KEYS.history)).toEqual([]);
 
-    for (const key of [MAIN_KEYS.history, MAIN_KEYS.game, MAIN_KEYS.boards, MAIN_KEYS.notes])
+    for (const key of Object.values(MAIN_KEYS))
       expect(kv.getItem(key)).toBe(before.get(key) ?? null);
     expect(kv.keysStartingWith("nekopatch-").filter((k) => !before.has(k))).toEqual([
       TRIAL_KEYS.game,
       TRIAL_KEYS.history,
       TRIAL_KEYS.boards,
       TRIAL_KEYS.notes,
+      TRIAL_KEYS.received,
     ]);
     expect(() => trialStorage(kv).setItem(MAIN_KEYS.history, "[]")).toThrow();
   });
@@ -1864,5 +1902,561 @@ describe("今までの記録を引き継ぐ（自動×の欄）", () => {
     expect(asOld.intact).toBe(true);
     expect(asOld.game?.playing?.st).toEqual(saved.st);
     expect(asOld.game?.playing?.autoXUsed).toBe(false);
+  });
+});
+
+// ---------- 盤面をほかの人と共有する（share-board） ----------
+
+/** 盤面 p（難しさ d）を送るリンクの # の後ろ。sender は送った人のタイム（秒）とヒントの回数。null ならタイムの無いリンク */
+function linkOf(
+  p: Puzzle,
+  sender: { readonly t: number; readonly h: number } | null = { t: 205, h: 0 },
+  d = 2,
+): string {
+  const base = `n=${p.N}&d=${d}&b=${codeOf(p)}`;
+  return sender === null ? base : `${base}&t=${sender.t}&h=${sender.h}`;
+}
+/** 共有の画面に渡した最後の文の行 */
+function lastShared(h: Harness): string[] {
+  const t = h.shares[h.shares.length - 1];
+  if (t === undefined) throw new Error("共有の画面に何も渡していません");
+  return t.split("\n");
+}
+function storedReceived(kv: MemoryStorage, key = MAIN_KEYS.received): Record<string, unknown> {
+  return JSON.parse(kv.getItem(key) ?? "{}");
+}
+/** 盤面のマス i を指で 1 回押す（空白 → ×、× → 猫、猫 → 空白） */
+function tapCell(i: number): void {
+  const board = $("board");
+  const cell = board.querySelectorAll<HTMLElement>(".cell")[i] ?? null;
+  const original = document.elementFromPoint;
+  document.elementFromPoint = () => cell;
+  board.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, button: 0, bubbles: true }));
+  board.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1, button: 0, bubbles: true }));
+  document.elementFromPoint = original;
+}
+/** 盤面 p の答えでないマス（× を付けてもよいマス） */
+function notSolution(p: Puzzle): number[] {
+  const sol = [...solutionCells(p)];
+  return [...Array(p.N * p.N).keys()].filter((i) => !sol.includes(i));
+}
+/** ヒントを使わずに、今の盤面 p を ms かけて解く（答えのマスを 2 回ずつ押して猫を置く） */
+function solveByHand(h: Harness, p: Puzzle, ms: number): void {
+  h.clock.now += ms;
+  for (const i of solutionCells(p)) {
+    tapCell(i);
+    tapCell(i);
+  }
+  expect($("win").hidden).toBe(false);
+}
+/** 送られてきた盤面の案内の「この盤面を遊ぶ」を押す */
+function playShared(): void {
+  expect($("shared").hidden).toBe(false);
+  click("sharedPlay");
+}
+/** 一覧の行 tr の「送る」を押す */
+function clickSend(tr: Element): void {
+  const btn = tr.querySelector<HTMLButtonElement>("button.send");
+  if (btn === null) throw new Error("「送る」がありません");
+  btn.click();
+}
+/** 新しい順の一覧で、記録 r の行のすぐ下の、もらった盤面の行の文字。無ければ null */
+function receivedOf(r: ClearRecord): string | null {
+  return recordRow(r).nextElementSibling?.querySelector("td.receivedNote")?.textContent ?? null;
+}
+/** 盤面 A を送ってくれた人の印（3:25・ヒント 0 回）がある記録 r */
+function receivedA(r: ClearRecord): Record<string, string> {
+  return {
+    [MAIN_KEYS.received]: JSON.stringify({
+      [recordKey(r)]: { senderTime: 205000, senderHints: 0 },
+    }),
+  };
+}
+
+describe("盤面を送る文とリンク", () => {
+  it("クリアの画面の、この盤面を送るで、タイムとヒントを付けて送る", async () => {
+    const h = await start();
+    const p = fixedPuzzle(8, 2, 0);
+    solveByHand(h, p, 205800);
+    click("winShare");
+    await h.app.whenIdle();
+    expect(lastShared(h)).toEqual([
+      `ねこパッチの盤面 ${idOf(p)}（8×8・ふつう）`,
+      "3:25・ヒント 0 回でクリア。挑戦してみて！",
+      `${PAGE}?openExternalBrowser=1#n=8&d=2&b=${codeOf(p)}&t=205&h=0`,
+    ]);
+  });
+
+  it("送る文とリンクには、日時と備考を入れない", async () => {
+    const r: ClearRecord = { at: TODAY, n: 8, d: 2, t: 90000, h: 1 };
+    const kv = withBoards([[r, PA]], {
+      [MAIN_KEYS.notes]: JSON.stringify({ [recordKey(r)]: { memo: "左下で迷った", hard: true } }),
+    });
+    const h = await start({ kv });
+    click("recBtn");
+    clickSend(recordRow(r));
+    await h.app.whenIdle();
+    const sent = h.shares.join("\n");
+    expect(sent).toContain(idOf(PA));
+    for (const word of ["左下で迷った", "難", "10/22", "10:00", String(TODAY)])
+      expect(sent).not.toContain(word);
+  });
+});
+
+describe("盤面を送る場所", () => {
+  it("遊んでいる途中に送ると、タイムの代わりにこれ解ける？と書く", async () => {
+    const h = await start();
+    const p = fixedPuzzle(8, 2, 0);
+    for (const i of notSolution(p).slice(0, 2)) tapCell(i);
+    h.clock.now += 70000;
+    click("shareBtn");
+    await h.app.whenIdle();
+    expect(lastShared(h)).toEqual([
+      `ねこパッチの盤面 ${idOf(p)}（8×8・ふつう）`,
+      "これ解ける？",
+      `${PAGE}?openExternalBrowser=1#n=8&d=2&b=${codeOf(p)}`,
+    ]);
+  });
+
+  it("記録の一覧の新しい順の行からは、その回のタイムを付けて送る", async () => {
+    const a1 = play(0, 300000, 2);
+    const a2 = play(1, 90000, 0);
+    const h = await start({
+      kv: withBoards([
+        [a1, PA],
+        [a2, PA],
+      ]),
+    });
+    click("recBtn");
+    clickSend(recordRow(a2));
+    await h.app.whenIdle();
+    const [, body, link] = lastShared(h);
+    expect(body).toBe("1:30・ヒント 0 回でクリア。挑戦してみて！");
+    expect(link?.endsWith("&t=90&h=0")).toBe(true);
+  });
+
+  it("盤面ごとの行からは、初回のタイムを付けて送る", async () => {
+    const a1 = play(0, 300000, 2);
+    const a2 = play(1, 90000, 0);
+    const h = await start({
+      kv: withBoards([
+        [a1, PA],
+        [a2, PA],
+      ]),
+    });
+    click("recBtn");
+    choose("recSort", "slow");
+    const [row] = document.querySelectorAll("#recList tbody tr");
+    if (row === undefined) throw new Error("行がありません");
+    clickSend(row);
+    await h.app.whenIdle();
+    const [, body, link] = lastShared(h);
+    expect(body).toBe("5:00・ヒント 2 回でクリア。挑戦してみて！");
+    expect(link?.endsWith("&t=300&h=2")).toBe(true);
+  });
+
+  it("盤面の形が無い記録の行には、送るが出ない", async () => {
+    const old = play(0, 100000);
+    const nw = play(1, 120000);
+    await start({
+      kv: withBoards([
+        [old, null],
+        [nw, PA],
+      ]),
+    });
+    click("recBtn");
+    expect(document.querySelectorAll("#recList button.send")).toHaveLength(1);
+    expect(recordRow(nw).querySelector("button.send")).not.toBeNull();
+    expect(recordRow(old).querySelector("button.send")).toBeNull();
+  });
+});
+
+describe("共有の画面が無ければ、文を写す", () => {
+  it("写したら、写しましたと出す", async () => {
+    const h = await start({ shareResult: "copied" });
+    solveTaking(h, 65000);
+    click("winShare");
+    await h.app.whenIdle();
+    expect($("winShareMsg").hidden).toBe(false);
+    expect(text("winShareMsg")).toBe(SHARE_MESSAGES.copied);
+    expect(SHARE_MESSAGES.copied).toBe("写しました。LINE などに貼ってください。");
+  });
+
+  it("共有の画面で送るか閉じたら、何も出さない", async () => {
+    for (const shareResult of ["shared", "cancelled"] as const) {
+      resetPage();
+      const h = await start({ shareResult });
+      solveTaking(h, 65000);
+      click("winShare");
+      await h.app.whenIdle();
+      expect(h.shares).toHaveLength(1);
+      expect($("winShareMsg").hidden).toBe(true);
+      h.app.stop();
+    }
+  });
+
+  it("送れなければ、送れませんでしたと出す", async () => {
+    const r = play(0, 100000);
+    const h = await start({ shareResult: "failed", kv: withBoards([[r, PA]]) });
+    click("recBtn");
+    clickSend(recordRow(r));
+    await h.app.whenIdle();
+    expect($("recPlayMsg").hidden).toBe(false);
+    expect(text("recPlayMsg")).toBe("送れませんでした。くろに相談してください。");
+  });
+
+  it("盤面の下の送るで写したら、盤面の下に写しましたと出す", async () => {
+    const h = await start({ shareResult: "copied" });
+    click("shareBtn");
+    await h.app.whenIdle();
+    expect(text("msgText")).toBe(SHARE_MESSAGES.copied);
+  });
+});
+
+describe("リンクを開くと、送られてきた盤面の案内を出す", () => {
+  it("リンクを開くと、送られてきた盤面と送ってくれた人のタイムが出る", async () => {
+    await start({ link: linkOf(PA) });
+    expect($("shared").hidden).toBe(false);
+    expect($("shared").querySelector("h2")?.textContent).toBe("送られてきた盤面");
+    expect(text("sharedBoard")).toBe(`8×8・ふつう　${idOf(PA)}`);
+    expect($("sharedSender").hidden).toBe(false);
+    expect(text("sharedSender")).toBe("送ってくれた人: 3:25・ヒント 0 回");
+    expect($("sharedBusy").hidden).toBe(true);
+    expect($("sharedPlay").hidden).toBe(false);
+    expect(text("sharedPlay")).toBe("この盤面を遊ぶ");
+    expect(text("sharedNo")).toBe("やめる");
+  });
+
+  it("タイムの無いリンクでは、送ってくれた人のタイムを出さない", async () => {
+    await start({ link: linkOf(PA, null) });
+    expect($("shared").hidden).toBe(false);
+    expect(text("sharedBoard")).toBe(`8×8・ふつう　${idOf(PA)}`);
+    expect($("sharedSender").hidden).toBe(true);
+  });
+
+  it("この盤面を遊ぶで、送られてきた盤面を最初から遊べる", async () => {
+    const kv = new MemoryStorage({ [MAIN_KEYS.game]: oldGame({ size: "6", diff: "1" }) });
+    await start({ kv, link: linkOf(PA) });
+    expect(document.querySelectorAll("#board .cell")).toHaveLength(36);
+    playShared();
+    expect($("shared").hidden).toBe(true);
+    expect(boardRegions()).toEqual(PA.reg);
+    expect(boardMarks().every((v) => v === "")).toBe(true);
+    expect(text("timer")).toBe("0:00");
+    expect(text("hintCount")).toBe("0");
+    expect(($("size") as HTMLSelectElement).value).toBe("8");
+    expect(($("diff") as HTMLSelectElement).value).toBe("2");
+  });
+
+  it("遊びかけの盤面があれば、やめになることを書き添える", async () => {
+    const h = await start();
+    const [x = 0] = notSolution(fixedPuzzle(8, 2, 0));
+    tapCell(x);
+    await h.openLink(linkOf(PA));
+    expect($("sharedBusy").hidden).toBe(false);
+    expect(text("sharedBusy")).toBe(SHARED_MESSAGES.busy);
+    expect(SHARED_MESSAGES.busy).toBe("遊ぶと、今の遊びかけの盤面はやめになります。");
+    playShared();
+    expect(boardRegions()).toEqual(PA.reg);
+  });
+
+  it("やめるを押すと、今の盤面のまま、止めていた時間から続ける", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    const p = fixedPuzzle(8, 2, 0);
+    const [x = 0] = notSolution(p);
+    tapCell(x);
+    h.clock.now += 60000;
+    await h.openLink(linkOf(PA));
+    h.clock.now += 30000;
+    click("sharedNo");
+    expect($("shared").hidden).toBe(true);
+    expect(boardRegions()).toEqual(p.reg);
+    expect(boardMarks().filter((v) => v === "x")).toHaveLength(1);
+    // 案内を出していた 30 秒は入らず、閉じたあとの 10 秒は入る
+    h.clock.now += 10000;
+    goBackground();
+    expect(JSON.parse(kv.getItem(MAIN_KEYS.game) ?? "{}").elapsed).toBe(70000);
+  });
+
+  it("開けないリンクは、開けませんでしたと出す", async () => {
+    const kv = new MemoryStorage({ [MAIN_KEYS.game]: oldGame({ size: "6", diff: "1" }) });
+    const h = await start({ kv });
+    await h.openLink(`n=8&d=2&b=${codeOf(PA).slice(1)}&t=205&h=0`);
+    expect($("shared").hidden).toBe(false);
+    expect($("shared").querySelector("h2")?.textContent).toBe("送られてきた盤面");
+    expect(text("sharedBoard")).toBe("このリンクの盤面は開けませんでした。");
+    expect(SHARED_MESSAGES.broken).toBe("このリンクの盤面は開けませんでした。");
+    expect($("sharedPlay").hidden).toBe(true);
+    expect($("sharedSender").hidden).toBe(true);
+    expect(text("sharedNo")).toBe("閉じる");
+    click("sharedNo");
+    expect($("shared").hidden).toBe(true);
+    expect(document.querySelectorAll("#board .cell")).toHaveLength(36);
+    expect(($("size") as HTMLSelectElement).value).toBe("6");
+  });
+
+  it("ゲームを開いたまま別のリンクを開いても、案内が出る", async () => {
+    const h = await start();
+    expect($("shared").hidden).toBe(true);
+    await h.openLink(linkOf(PA));
+    expect($("shared").hidden).toBe(false);
+    expect(text("sharedBoard")).toBe(`8×8・ふつう　${idOf(PA)}`);
+  });
+});
+
+describe("もらった盤面をクリアしたら、送ってくれた人と比べる", () => {
+  /** 盤面 A の 3:25・ヒント 0 回のリンクから遊び、ms かけてクリアしたときの比べの文 */
+  async function versusAfter(
+    ms: number,
+    sender: { t: number; h: number } | null = { t: 205, h: 0 },
+  ) {
+    const h = await start({ link: linkOf(PA, sender) });
+    playShared();
+    solveByHand(h, PA, ms);
+    return $("winVersus").hidden ? null : text("winVersus");
+  }
+
+  it("送ってくれた人より速ければ、速いと出す", async () => {
+    expect(await versusAfter(175000)).toBe("送ってくれた人（3:25）より 0:30 速い！");
+  });
+
+  it("送ってくれた人より遅ければ、遅いと出す", async () => {
+    expect(await versusAfter(240000)).toBe("送ってくれた人（3:25）より 0:35 遅い");
+  });
+
+  it("画面のタイムが同じなら、同じタイムと出す", async () => {
+    expect(await versusAfter(205900)).toBe("送ってくれた人（3:25）と同じタイム！");
+  });
+
+  it("タイムの無いリンクの盤面は、送ってくれた人と比べない", async () => {
+    expect(await versusAfter(175000, null)).toBeNull();
+  });
+
+  it("もらった盤面の途中でページを閉じても、続きから送ってくれた人と比べる", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv, link: linkOf(PA) });
+    playShared();
+    const [x = 0] = notSolution(PA);
+    tapCell(x);
+    h.app.stop();
+    resetPage();
+    const again = await start({ kv });
+    expect(boardRegions()).toEqual(PA.reg);
+    solveByHand(again, PA, 175000);
+    expect(text("winVersus")).toBe("送ってくれた人（3:25）より 0:30 速い！");
+  });
+
+  it("もらった盤面のもう一度この盤面は、もらった盤面としない", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv, link: linkOf(PA) });
+    playShared();
+    solveByHand(h, PA, 100000);
+    expect($("winVersus").hidden).toBe(false);
+    click("winRetry");
+    solveByHand(h, PA, 120000);
+    expect($("winVersus").hidden).toBe(true);
+    const [first, second] = storedRecords(kv);
+    if (first === undefined || second === undefined) throw new Error("記録が 2 件ありません");
+    click("recBtn");
+    expect(receivedOf(first)).not.toBeNull();
+    expect(receivedOf(second)).toBeNull();
+  });
+});
+
+describe("もらった盤面の記録は、今までと同じ決まりで数える", () => {
+  it("もらった盤面の記録は、初めての盤面として数える", async () => {
+    const kv = withBoards([[play(0, 300000), null]], {
+      [MAIN_KEYS.game]: oldGame({ solvedCount: 10 }),
+    });
+    const h = await start({ kv, link: linkOf(PA) });
+    expect(text("solved")).toBe("10");
+    playShared();
+    solveByHand(h, PA, 180000);
+    expect(text("solved")).toBe("11");
+    click("recBtn");
+    const row = summaryRows().find((r) => r[0] === "8×8 ふつう");
+    expect(row?.[1]).toBe("2");
+    expect(row?.[2]).toBe("4:00");
+  });
+
+  it("前に遊んだ盤面のリンクなら、もう一度遊んだ記録になる", async () => {
+    const kv = withBoards([[play(0, 300000), PA]], {
+      [MAIN_KEYS.game]: oldGame({ solvedCount: 1 }),
+    });
+    const h = await start({ kv, link: linkOf(PA, { t: 240, h: 0 }) });
+    playShared();
+    solveByHand(h, PA, 180000);
+    expect(text("winCompare")).toBe(
+      "この盤面の自己ベスト！　この盤面 2 回目　前回より 2:00 速い　ベスト 3:00",
+    );
+    expect(text("solved")).toBe("1");
+  });
+});
+
+describe("記録の一覧に、もらった盤面と出す", () => {
+  it("もらった盤面の記録の行に、送ってくれた人のタイムを出す", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv, link: linkOf(PA) });
+    playShared();
+    solveByHand(h, PA, 295000);
+    const [r] = storedRecords(kv);
+    if (r === undefined) throw new Error("記録がありません");
+    click("recBtn");
+    expect(receivedOf(r)).toBe("もらった盤面（送ってくれた人 3:25・ヒント 0 回）");
+  });
+
+  it("タイムの無いリンクの盤面の行には、もらった盤面とだけ出す", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv, link: linkOf(PA, null) });
+    playShared();
+    solveByHand(h, PA, 95000);
+    const [r] = storedRecords(kv);
+    if (r === undefined) throw new Error("記録がありません");
+    click("recBtn");
+    expect(receivedOf(r)).toBe("もらった盤面");
+  });
+});
+
+describe("もらった盤面の印は、記録とは別のキーに置く", () => {
+  it("もらった盤面の印は、記録とは別のキーに置く", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv, link: linkOf(PA) });
+    playShared();
+    solveByHand(h, PA, 95000);
+    const [r] = storedRecords(kv);
+    if (r === undefined) throw new Error("記録がありません");
+    expect(Object.keys(r)).toEqual(["at", "n", "d", "t", "h"]);
+    expect(storedReceived(kv)).toEqual({
+      [recordKey(r)]: { senderTime: 205000, senderHints: 0 },
+    });
+  });
+
+  it("読めないもらった盤面の保存データは、消さずに別の場所に残す", async () => {
+    const kv = new MemoryStorage({
+      [MAIN_KEYS.history]: oldHistory([C]),
+      [MAIN_KEYS.received]: '{"1":',
+    });
+    await start({ kv });
+    expect(kv.getItem(`${MAIN_KEYS.received}-unreadable-${TODAY}`)).toBe('{"1":');
+    click("recBtn");
+    expect(listRows()).toHaveLength(1);
+    expect(document.querySelector("#recList td.receivedNote")).toBeNull();
+    expect($("recUnreadable").hidden).toBe(false);
+    expect(text("recUnreadable")).toBe(
+      "読めない記録がありました。消さずに別の場所に残してあります。くろに相談してください。",
+    );
+  });
+
+  it("確かめ用のページは、もらった盤面の印を確かめ用のキーに置き、確かめ用のリンクを送る", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv, trial: true, link: linkOf(PA) });
+    playShared();
+    solveByHand(h, PA, 95000);
+    click("winShare");
+    await h.app.whenIdle();
+    expect(Object.keys(storedReceived(kv, TRIAL_KEYS.received))).toHaveLength(1);
+    expect(kv.getItem(MAIN_KEYS.received)).toBeNull();
+    expect(lastShared(h)[2]?.startsWith(`${TRIAL_PAGE}?openExternalBrowser=1#n=8&d=2&b=`)).toBe(
+      true,
+    );
+  });
+});
+
+describe("もらった盤面の印を、書き出し・読み込みで移し、全部消すと消す", () => {
+  const r1 = play(0, 295000);
+  const r2 = play(1, 120000);
+
+  it("書き出したファイルに、もらった盤面の印が入る", async () => {
+    const h = await start({
+      kv: withBoards(
+        [
+          [r1, PA],
+          [r2, PB],
+        ],
+        receivedA(r1),
+      ),
+    });
+    click("recBtn");
+    click("recExport");
+    const file = JSON.parse(h.downloads[0]?.text ?? "{}");
+    expect(file.version).toBe(1);
+    expect(file.records[0].received).toEqual({ senderTime: 205000, senderHints: 0 });
+    expect(file.records[1]).not.toHaveProperty("received");
+    expect(h.downloads[0]?.text).toContain('"received":{"senderTime":205000,"senderHints":0}');
+  });
+
+  it("読み込むと、もらった盤面の印も移る", async () => {
+    const file = JSON.stringify({
+      format: "nekopatch-records",
+      version: 1,
+      solvedCount: 1,
+      records: [{ ...r1, b: codeOf(PA), received: { senderTime: 205000, senderHints: 0 } }],
+    });
+    const h = await start();
+    click("recBtn");
+    await importFile(h, file);
+    expect(receivedOf(r1)).toBe("もらった盤面（送ってくれた人 3:25・ヒント 0 回）");
+  });
+
+  it("もらった盤面の印が読めないファイルは、何も読み込まない", async () => {
+    const kv = threeRecords();
+    const before = kv.getItem(MAIN_KEYS.history);
+    const file = JSON.stringify({
+      format: "nekopatch-records",
+      version: 1,
+      solvedCount: 1,
+      records: [{ ...C, received: { senderTime: -1, senderHints: 0 } }],
+    });
+    const h = await start({ kv });
+    click("recBtn");
+    await importFile(h, file);
+    expect(text("recImportMsg")).toBe(IMPORT_MESSAGES.unreadable);
+    expect(kv.getItem(MAIN_KEYS.history)).toBe(before);
+    expect(kv.getItem(MAIN_KEYS.received)).toBeNull();
+  });
+
+  it("記録を全部消すと、もらった盤面の印も消える", async () => {
+    const kv = withBoards([[r1, PA]], receivedA(r1));
+    await start({ kv });
+    click("recBtn");
+    click("recClear");
+    click("recClearYes");
+    expect(kv.getItem(MAIN_KEYS.history)).toBe("[]");
+    expect(kv.getItem(MAIN_KEYS.received)).toBe("{}");
+  });
+});
+
+describe("今までの記録を引き継ぐ（もらった盤面の欄）", () => {
+  /** 作り直す前の版が保存していた欄 */
+  const OLD_FIELDS = ["P", "st", "elapsed", "won", "solvedCount", "hints", "autoX", "size", "diff"];
+
+  it("もらった盤面の遊びかけは、欄を 1 つ足して保存し、前の版も読める", async () => {
+    const kv = new MemoryStorage();
+    await start({ kv, link: linkOf(PA) });
+    playShared();
+    const [x = 0] = notSolution(PA);
+    tapCell(x);
+    const raw = kv.getItem(MAIN_KEYS.game) ?? "{}";
+    const saved = JSON.parse(raw);
+    expect(Object.keys(saved)).toEqual([...OLD_FIELDS, "received"]);
+    expect(saved.received).toEqual({ senderTime: 205000, senderHints: 0 });
+    expect(parseSavedGame(raw).game?.playing?.received).toEqual({
+      sender: { time: 205000, hints: 0 },
+    });
+    // 前の版は、足した欄を読み飛ばす。足した欄を除いた値も、同じ遊びかけの盤面として読める
+    const { received: _, ...old } = saved;
+    const asOld = parseSavedGame(JSON.stringify(old));
+    expect(asOld.intact).toBe(true);
+    expect(asOld.game?.playing?.st).toEqual(saved.st);
+    expect(asOld.game?.playing?.received).toBeNull();
+  });
+
+  it("もらった盤面でない遊びかけには、もらった盤面の欄を書かない", async () => {
+    const kv = new MemoryStorage();
+    await start({ kv });
+    const [x = 0] = notSolution(fixedPuzzle(8, 2, 0));
+    tapCell(x);
+    expect(Object.keys(JSON.parse(kv.getItem(MAIN_KEYS.game) ?? "{}"))).toEqual(OLD_FIELDS);
   });
 });

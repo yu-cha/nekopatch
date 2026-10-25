@@ -3,7 +3,7 @@
 // 確かめ用のページ（/nekopatch/preview/）は、同じ yu-cha.github.io の保存領域を本物と共有するので、
 // 別のキーを使い、本物のキーには書かない（decisions の 2026-10-22 の判断を参照）。
 // 遊んだ盤面の形は、記録とは別のキーに置く。盤面を知らない前の版が記録を保存し直しても、消えないようにするため（判断 490d）。
-// 備考と「自動×」の印も、同じ理由で別のキーに置く（判断 c995）。
+// 備考と「自動×」の印も、同じ理由で別のキーに置く（判断 c995）。もらった盤面の印も同じ（判断 73b0）。
 
 import {
   type Boards,
@@ -14,12 +14,16 @@ import {
   parseStoredBoards,
   parseStoredHistory,
   parseStoredNotes,
+  parseStoredReceived,
+  type Received,
+  type ReceivedBoards,
   type RecordNote,
   type SavedGame,
   serializeBoards,
   serializeGame,
   serializeHistory,
   serializeNotes,
+  serializeReceived,
 } from "../../core/index.ts";
 
 /** localStorage のうち、使う部分 */
@@ -37,6 +41,8 @@ export interface StorageKeys {
   readonly boards: string;
   /** 備考と印（記録の鍵 → 文、「難」、「自動×」） */
   readonly notes: string;
+  /** もらった盤面の印（記録の鍵 → 送った人のタイムとヒントの回数） */
+  readonly received: string;
 }
 
 /** 本物のキー（game と history は作り直す前と同じ） */
@@ -45,6 +51,7 @@ export const MAIN_KEYS: StorageKeys = {
   history: "nekopatch-history-v1",
   boards: "nekopatch-boards-v1",
   notes: "nekopatch-notes-v1",
+  received: "nekopatch-received-v1",
 };
 
 /** 確かめ用のページのキー。すべてこの前置きで始める */
@@ -54,6 +61,7 @@ export const TRIAL_KEYS: StorageKeys = {
   history: `${TRIAL_PREFIX}history-v1`,
   boards: `${TRIAL_PREFIX}boards-v1`,
   notes: `${TRIAL_PREFIX}notes-v1`,
+  received: `${TRIAL_PREFIX}received-v1`,
 };
 
 /**
@@ -69,7 +77,7 @@ export function trialStorage(storage: KeyValue, prefix: string = TRIAL_PREFIX): 
       storage.setItem(key, value);
     },
   };
-  for (const name of ["game", "history", "boards", "notes"] as const) {
+  for (const name of ["game", "history", "boards", "notes", "received"] as const) {
     if (guarded.getItem(TRIAL_KEYS[name]) !== null) continue;
     const real = guarded.getItem(MAIN_KEYS[name]);
     if (real !== null) {
@@ -140,6 +148,20 @@ export class SaveStore {
 
   saveNotes(notes: Notes): boolean {
     return this.write(this.keys.notes, serializeNotes(notes));
+  }
+
+  loadReceived(): Map<string, Received> {
+    const raw = this.read(this.keys.received);
+    const { received, intact } = parseStoredReceived(raw);
+    if (!intact && raw !== null && this.keepUnreadable(this.keys.received, raw)) {
+      // 読めた印だけで書き直す。次からは、読めない部分を毎回残し直さない
+      this.saveReceived(received);
+    }
+    return received;
+  }
+
+  saveReceived(received: ReceivedBoards): boolean {
+    return this.write(this.keys.received, serializeReceived(received));
   }
 
   loadGame(): SavedGame | null {

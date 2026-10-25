@@ -4,10 +4,19 @@
 // 遊んだ盤面の形は、記録とは別に、記録の鍵ごとに持つ（判断 490d）。同じ盤面の 2 回目からを「もう一度遊んだ記録」とし、
 // 成績の表と「クリア ○ 問」には数えない（ナンとの合意 2026-10-23）。
 // 備考と「自動×」の印も、記録とは別に、記録の鍵ごとに持つ（notes.ts、判断 c995）。
+// もらった盤面の印も、記録とは別に、記録の鍵ごとに持つ（share.ts、判断 73b0）。
 
 import { boardId, isBoardCode } from "./board.ts";
 import { mergeNotes, NO_NOTES, type Notes, type RecordNote, readNoteFields } from "./notes.ts";
 import { LEVELS, SIZES } from "./play.ts";
+import {
+  mergeReceived,
+  NO_RECEIVED,
+  type Received,
+  type ReceivedBoards,
+  readReceived,
+  receivedJson,
+} from "./share.ts";
 
 /** 1 回のクリア。at は日時（ミリ秒）、n は盤面の大きさ、d は難しさ、t はタイム（ミリ秒）、h はヒントの回数 */
 export interface ClearRecord {
@@ -23,13 +32,15 @@ export type Boards = ReadonlyMap<string, string>;
 
 const NO_BOARDS: Boards = new Map();
 
-/** クリアの記録と「クリア ○ 問」の数と、遊んだ盤面の形と、備考と印。書き出すファイルの中身 */
+/** クリアの記録と「クリア ○ 問」の数と、遊んだ盤面の形と、備考と印と、もらった盤面の印。書き出すファイルの中身 */
 export interface RecordsData {
   readonly solvedCount: number;
   readonly records: readonly ClearRecord[];
   readonly boards: Boards;
   /** 備考と印。無ければ、どの記録にも無い */
   readonly notes?: Notes;
+  /** もらった盤面の印。無ければ、どの記録にも無い */
+  readonly received?: ReceivedBoards;
 }
 
 function isNonNegativeInteger(x: unknown): x is number {
@@ -283,8 +294,9 @@ export interface BoardRow {
   readonly code: string;
   readonly id: string;
   readonly count: number;
-  /** 初回のタイム */
+  /** 初回のタイムとヒントの回数 */
   readonly first: number;
+  readonly firstHints: number;
   /** 一番速いタイム */
   readonly best: number;
   /** 一番少ないヒントの回数 */
@@ -312,6 +324,7 @@ export function boardRows(
       code: string;
       count: number;
       first: number;
+      firstHints: number;
       best: number;
       minHints: number;
       lastAt: number;
@@ -330,6 +343,7 @@ export function boardRows(
         code,
         count: 1,
         first: r.t,
+        firstHints: r.h,
         best: r.t,
         minHints: r.h,
         lastAt: r.at,
@@ -422,14 +436,15 @@ export function compareWin(
 /** 書き出すファイルの種類の印。読み込むときに、ねこパッチの記録のファイルかを見分ける */
 export const RECORDS_FILE_FORMAT = "nekopatch-records";
 /**
- * 版は、前の版が無視すると困る変更のときだけ上げる。盤面の形（記録の欄 b）と、備考と印（memo、hard、autoX）は、
- * 無視されても困らないので 1 のまま（判断 490d、c995）
+ * 版は、前の版が無視すると困る変更のときだけ上げる。盤面の形（記録の欄 b）と、備考と印（memo、hard、autoX）と、
+ * もらった盤面の印（received）は、無視されても困らないので 1 のまま（判断 490d、c995、73b0）
  */
 export const RECORDS_FILE_VERSION = 1;
 
 /**
  * 書き出すファイルの中身。記録は 1 件を 1 行にして、人が開いても読めるようにする。
- * 盤面の形がある記録には b を、備考か印がある記録には memo・hard・autoX のうちあるものを付ける
+ * 盤面の形がある記録には b を、備考か印がある記録には memo・hard・autoX のうちあるものを、
+ * もらった盤面の記録には received を付ける
  */
 export function exportText(data: RecordsData, exportedAt: Date): string {
   const head = [
@@ -439,11 +454,18 @@ export function exportText(data: RecordsData, exportedAt: Date): string {
     `"solvedCount": ${data.solvedCount}`,
   ];
   const notes = data.notes ?? NO_NOTES;
+  const received = data.received ?? NO_RECEIVED;
   const lines = data.records.map((r) => {
     const k = recordKey(r);
     const b = data.boards.get(k);
     const note = notes.get(k);
-    return `    ${JSON.stringify({ ...normalize(r), ...(b === undefined ? {} : { b }), ...note })}`;
+    const rv = received.get(k);
+    return `    ${JSON.stringify({
+      ...normalize(r),
+      ...(b === undefined ? {} : { b }),
+      ...note,
+      ...(rv === undefined ? {} : { received: receivedJson(rv) }),
+    })}`;
   });
   const records = lines.length === 0 ? `"records": []` : `"records": [\n${lines.join(",\n")}\n  ]`;
   return `{\n${[...head, records].map((l) => `  ${l}`).join(",\n")}\n}\n`;
@@ -459,14 +481,17 @@ export function exportFileName(date: Date): string {
 
 /**
  * ファイルの記録の 1 行として読めるか。盤面の形（b）は無くてもよいが、あればその大きさの盤面の符号でなければならない。
- * 備考と印（memo は文字列、hard と autoX は真偽値）も、無くてもよいが、あれば読めなければならない
+ * 備考と印（memo は文字列、hard と autoX は真偽値）と、もらった盤面の印（received）も、無くてもよいが、あれば読めなければならない
  */
-function isFileRecord(x: unknown): x is ClearRecord & { readonly b?: string } {
+function isFileRecord(
+  x: unknown,
+): x is ClearRecord & { readonly b?: string; readonly received?: unknown } {
   if (!isClearRecord(x)) return false;
-  const b = (x as { b?: unknown }).b;
+  const { b, received } = x as { b?: unknown; received?: unknown };
   return (
     (b === undefined || isBoardCode(x.n, b)) &&
-    readNoteFields(x as unknown as Record<string, unknown>).ok
+    readNoteFields(x as unknown as Record<string, unknown>).ok &&
+    (received === undefined || readReceived(received) !== null)
   );
 }
 
@@ -486,6 +511,7 @@ export function parseExport(text: string): RecordsData | null {
   const records = f.records.map(normalize);
   const boards = new Map<string, string>();
   const notes = new Map<string, RecordNote>();
+  const received = new Map<string, Received>();
   f.records.forEach((r, i) => {
     const rec = records[i];
     if (rec === undefined) return;
@@ -493,9 +519,17 @@ export function parseExport(text: string): RecordsData | null {
     if (r.b !== undefined) boards.set(k, r.b);
     const { note } = readNoteFields(r as unknown as Record<string, unknown>);
     if (note !== null) notes.set(k, note);
+    const rv = r.received === undefined ? null : readReceived(r.received);
+    if (rv !== null) received.set(k, rv);
   });
-  // 備考の無い前のファイルは、備考の欄を足す前と同じ値に読む
-  return { solvedCount: f.solvedCount, records, boards, ...(notes.size > 0 ? { notes } : {}) };
+  // 備考やもらった盤面の印の無い前のファイルは、その欄を足す前と同じ値に読む
+  return {
+    solvedCount: f.solvedCount,
+    records,
+    boards,
+    ...(notes.size > 0 ? { notes } : {}),
+    ...(received.size > 0 ? { received } : {}),
+  };
 }
 
 /**
@@ -504,6 +538,7 @@ export function parseExport(text: string): RecordsData | null {
  * - 記録は日時の順に並べる
  * - 盤面の形は、同じ記録の鍵で足す（今の値があれば変えない）
  * - 備考と印は、同じ記録の鍵で合わせる（mergeNotes。今のスマホに備考があれば今のまま）
+ * - もらった盤面の印は、同じ記録の鍵で足す（今のスマホにあれば今のまま）
  * - 「クリア ○ 問」は、ファイルの数に、今の記録のうちファイルに無いもの（新しいスマホでだけクリアした分）の数を足す。
  *   もう一度遊んだ記録（読み込んだあとの記録で判断する）は足さない。
  *   今の数より減らさない。同じファイルを何回読み込んでも増えない（ナンの答え 2026-10-22）
@@ -539,6 +574,7 @@ export function importRecords(
       records,
       boards,
       notes: mergeNotes(current.notes ?? NO_NOTES, file.notes ?? NO_NOTES),
+      received: mergeReceived(current.received ?? NO_RECEIVED, file.received ?? NO_RECEIVED),
     },
     added: fresh.length,
   };

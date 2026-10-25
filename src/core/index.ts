@@ -56,4 +56,17 @@ export {
   type SavedGame,
   serializeGame,
 } from "./saved-game.ts";
+export {
+  boardLabel,
+  parseShareFragment,
+  parseStoredReceived,
+  type Received,
+  type ReceivedBoards,
+  type SenderScore,
+  type SharedBoard,
+  scoreLabel,
+  serializeReceived,
+  shareText,
+  versusSender,
+} from "./share.ts";
 export { attacks, type CellState, type Step } from "./solver.ts";

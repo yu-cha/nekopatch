@@ -3,11 +3,14 @@
 // 2026-10-23 に、同じ盤面をもう一度遊ぶ仕組み（記録の一覧の「遊ぶ」、並べ替え、クリアの画面の「もう一度この盤面」）を足した。
 // 2026-10-23 に、記録の備考（ひと言と「難」）と「自動×」の印（クリアの画面の書く欄、記録の一覧の ✎）を足した。
 // ナンが書いた備考の文は、HTML の文字列に混ぜず、要素を作ったあとで textContent か value で入れる（判断 c995）。
+// 2026-10-25 に、盤面をほかの人に送る仕組み（「送る」、送られてきた盤面の案内、送ってくれた人との比べ）を足した（判断 73b0）。
 // ブラウザの機能（保存、問題作りの Worker、保存領域の頼み、ファイルの書き出し）は env を通して使い、テストでは偽物に差し替える。
 
 import {
   attacks,
   type BoardSort,
+  boardId,
+  boardLabel,
   boardRows,
   type Category,
   type CellState,
@@ -29,12 +32,19 @@ import {
   type PlayingPuzzle,
   type Puzzle,
   parseExport,
+  parseShareFragment,
   REGION_NAMES,
+  type Received,
   type RecordNote,
   recordKey,
   restorePuzzle,
+  type SenderScore,
+  type SharedBoard,
   SIZES,
+  scoreLabel,
+  shareText,
   summarize,
+  versusSender,
 } from "../../core/index.ts";
 import {
   type PersistApi,
@@ -43,6 +53,7 @@ import {
   requestPersist,
 } from "./persistence.ts";
 import type { SaveStore } from "./save-store.ts";
+import type { ShareResult } from "./share.ts";
 
 export interface AppEnv {
   readonly store: SaveStore;
@@ -58,6 +69,14 @@ export interface AppEnv {
   now(): number;
   /** ブラウザの確かめの窓（OK／キャンセル）を出し、OK なら true */
   confirm(message: string): boolean;
+  /** 送るリンクの元にする、開いているページのアドレス（? と # の後ろを除いたもの） */
+  readonly pageUrl: string;
+  /** 開いたアドレスの # の後ろ（送られてきた盤面のリンク）。リンクでなければ null。読んだらアドレスから消す */
+  takeLink(): string | null;
+  /** 開いているページの # の後ろが変わったら、listener を呼ぶ */
+  onLinkChange(listener: () => void, signal: AbortSignal): void;
+  /** 送る文を、スマホの共有の画面に渡す（無ければ写す）。押した操作の中で呼ぶ */
+  share(text: string): Promise<ShareResult>;
 }
 
 export interface App {
@@ -86,6 +105,18 @@ export const PLAY_MESSAGES = {
 export const WIN_SAVED_MESSAGES = {
   saved: "保存しました",
   failed: "保存できませんでした。「記録」を見てください",
+} as const;
+
+/** 盤面を送ったあとの知らせ。共有の画面で送ったか閉じたときは、何も出さない */
+export const SHARE_MESSAGES = {
+  copied: "写しました。LINE などに貼ってください。",
+  failed: "送れませんでした。くろに相談してください。",
+} as const;
+
+/** 送られてきた盤面の案内 */
+export const SHARED_MESSAGES = {
+  broken: "このリンクの盤面は開けませんでした。",
+  busy: "遊ぶと、今の遊びかけの盤面はやめになります。",
 } as const;
 
 /** 「記録を全部消す」の最後の確かめ（ブラウザの確かめの窓） */
@@ -158,8 +189,15 @@ export function startApp(doc: Document, env: AppEnv): App {
   let records: ClearRecord[] = env.store.loadRecords();
   let boards: Map<string, string> = env.store.loadBoards();
   let notes: Map<string, RecordNote> = env.store.loadNotes();
+  let receivedBoards: Map<string, Received> = env.store.loadReceived();
   /** この問題で「猫の周りに自動で×」を ON のまま猫を置いたか（「戻す」「最初から」でも戻さない） */
   let autoXUsed = false;
+  /** リンクの「この盤面を遊ぶ」で始めた問題なら、もらった盤面の印。そうでなければ null */
+  let received: Received | null = null;
+  /** いまクリアの画面に出している記録と盤面の符号（「この盤面を送る」で使う） */
+  let lastWin: { readonly rec: ClearRecord; readonly code: string } | null = null;
+  /** 送られてきた盤面の案内に出している盤面と、作り直した問題 */
+  let offer: { readonly board: SharedBoard; readonly puzzle: Puzzle } | null = null;
   /** クリアの画面の書く欄が備考を書く記録の鍵。クリアの画面を出していなければ null */
   let winKey: string | null = null;
   /** 記録の一覧で ✎ を押して、書く欄を開いている記録の鍵 */
@@ -187,6 +225,7 @@ export function startApp(doc: Document, env: AppEnv): App {
     records = env.store.loadRecords();
     boards = env.store.loadBoards();
     notes = env.store.loadNotes();
+    receivedBoards = env.store.loadReceived();
     solvedCount = Math.max(solvedCount, env.store.storedSolvedCount());
     $("solved").textContent = String(solvedCount);
   }
@@ -218,6 +257,7 @@ export function startApp(doc: Document, env: AppEnv): App {
         hints,
         autoX: autoX.checked,
         autoXUsed,
+        received,
         size: Number(sizeSel.value),
         diff: Number(diffSel.value),
       }),
@@ -231,7 +271,8 @@ export function startApp(doc: Document, env: AppEnv): App {
     $("timer").textContent = fmt(curElapsed());
   }, 500);
   function startTimer(): void {
-    if (!running && !won) {
+    // 送られてきた盤面の案内を出しているあいだは、時間を進めない
+    if (!running && !won && $("shared").hidden) {
       running = true;
       startT = env.now();
     }
@@ -329,12 +370,14 @@ export function startApp(doc: Document, env: AppEnv): App {
     P = playing;
     won = false;
     winKey = null;
+    lastWin = null;
     $("win").hidden = true;
     if (!keepState) {
       st = new Array<CellState>(playing.N * playing.N).fill(0);
       elapsed = 0;
       hints = 0;
       autoXUsed = false;
+      received = null;
     }
     $("hintCount").textContent = String(hints);
     undo = [];
@@ -365,8 +408,11 @@ export function startApp(doc: Document, env: AppEnv): App {
       }),
     );
   }
-  /** 前に遊んだ盤面を、何も置いていない状態から始める。大きさと難しさの選択も、その盤面に合わせる */
-  function replay(p: Puzzle, diff: number): void {
+  /**
+   * 前に遊んだ盤面か、送られてきた盤面を、何も置いていない状態から始める。大きさと難しさの選択も、その盤面に合わせる。
+   * from は、送られてきた盤面のときの、もらった盤面の印
+   */
+  function replay(p: Puzzle, diff: number, from: Received | null = null): void {
     commitWinMemo();
     puzzleRequest++;
     stopTimer();
@@ -374,6 +420,10 @@ export function startApp(doc: Document, env: AppEnv): App {
     diffSel.value = String(diff);
     $("loading").hidden = true;
     setPuzzle(p, diff, false);
+    if (from !== null) {
+      received = from;
+      save();
+    }
     boardEl.scrollIntoView?.({ behavior: "smooth", block: "center" });
   }
   function versusPrev(diff: number): string {
@@ -382,6 +432,21 @@ export function startApp(doc: Document, env: AppEnv): App {
       : diff > 0
         ? `前回より <span class="slower">${fmt(diff)} 遅い</span>`
         : "前回と同じタイム";
+  }
+  /** もらった盤面をクリアしたとき、クリアの画面に、送ってくれた人とのタイムの差を出す（秒の単位で比べる） */
+  function showVersusSender(sender: SenderScore | null): void {
+    const el = $("winVersus");
+    el.hidden = sender === null;
+    if (sender === null) return;
+    const df = versusSender(elapsed, sender);
+    const who = `送ってくれた人（${fmt(sender.time)}）`;
+    // 入れるのは数から作った文だけ
+    el.innerHTML =
+      df < 0
+        ? `${who}より <span class="faster">${fmt(-df)} 速い！</span>`
+        : df > 0
+          ? `${who}より <span class="slower">${fmt(df)} 遅い</span>`
+          : `${who}と同じタイム！`;
   }
   function onWin(p: PlayingPuzzle): void {
     won = true;
@@ -403,10 +468,18 @@ export function startApp(doc: Document, env: AppEnv): App {
       notes = changeNote(notes, key, { autoX: true });
       noteSaved = env.store.saveNotes(notes);
     }
+    let receivedSaved = true;
+    if (received !== null) {
+      receivedBoards.set(key, received);
+      receivedSaved = env.store.saveReceived(receivedBoards);
+    }
     records.push(rec);
     const recorded = env.store.saveRecords(records);
-    markSaved(boardSaved && noteSaved && recorded);
+    markSaved(boardSaved && noteSaved && receivedSaved && recorded);
     winKey = key;
+    lastWin = { rec, code };
+    $("winShareMsg").hidden = true;
+    showVersusSender(received?.sender ?? null);
     winMemo.value = "";
     winMemoShown = "";
     winHard.setAttribute("aria-pressed", "false");
@@ -590,6 +663,90 @@ export function startApp(doc: Document, env: AppEnv): App {
   };
   autoX.onchange = save;
 
+  // ---------- 盤面を送る（ナンとの合意 2026-10-25、判断 73b0） ----------
+  /** 送る文を共有の画面に渡し、写したか、送れなかったときだけ show で知らせる（送ったか閉じたら null） */
+  function sendBoard(b: SharedBoard, show: (text: string | null) => void): void {
+    show(null);
+    // 共有の画面は、押した操作の中で出す（あとから出すと、ブラウザに止められる）
+    track(
+      env
+        .share(shareText(env.pageUrl, b))
+        .then((r) =>
+          show(
+            r === "copied" ? SHARE_MESSAGES.copied : r === "failed" ? SHARE_MESSAGES.failed : null,
+          ),
+        ),
+    );
+  }
+  function showWinShareMessage(text: string | null): void {
+    const el = $("winShareMsg");
+    el.textContent = text ?? "";
+    el.hidden = text === null;
+  }
+  /** いまクリアした記録の、タイムとヒントの回数を付けて送る */
+  function sendLastWin(): void {
+    if (lastWin === null) return;
+    const { rec, code } = lastWin;
+    sendBoard(
+      { n: rec.n, d: rec.d, code, sender: { time: rec.t, hints: rec.h } },
+      showWinShareMessage,
+    );
+  }
+  $("winShare").onclick = sendLastWin;
+  // 盤面の下の「送る」。クリアしていなければタイムを付けず、クリアしたあとはクリアの画面と同じ
+  $("shareBtn").onclick = () => {
+    if (P === null) return;
+    if (won) {
+      sendLastWin();
+      return;
+    }
+    const p = P;
+    sendBoard({ n: p.N, d: p.diff, code: encodeBoard(p.N, p.reg), sender: null }, (text) => {
+      if (text !== null) say(text);
+      else {
+        // 前に出した送るときの知らせだけを消す（ヒントの文などは消さない）
+        const shown = $("msgText").textContent;
+        if (shown === SHARE_MESSAGES.copied || shown === SHARE_MESSAGES.failed)
+          say(DEFAULT_MESSAGE);
+      }
+    });
+  };
+
+  // ---------- 送られてきた盤面の案内 ----------
+  /** リンクの # の後ろを読み、送られてきた盤面の案内を出す。null（リンクでない）なら何もしない */
+  function openLink(fragment: string | null): void {
+    if (fragment === null) return;
+    offer = parseShareFragment(fragment);
+    // 遊んでいる途中（クリアしていない盤面に、猫か × を置いている）なら、やめになることを書き添える
+    const busy = P !== null && !won && st.some((v) => v !== 0);
+    const sender = offer?.board.sender ?? null;
+    $("sharedBoard").textContent =
+      offer === null
+        ? SHARED_MESSAGES.broken
+        : `${boardLabel(offer.board.n, offer.board.d)}　${boardId(offer.board.n, offer.board.code)}`;
+    $("sharedSender").textContent = sender === null ? "" : `送ってくれた人: ${scoreLabel(sender)}`;
+    $("sharedSender").hidden = sender === null;
+    $("sharedBusy").hidden = offer === null || !busy;
+    $("sharedPlay").hidden = offer === null;
+    $("sharedNo").textContent = offer === null ? "閉じる" : "やめる";
+    $("shared").hidden = false;
+    // 案内を出しているあいだは、時間を止める
+    stopTimer();
+    save();
+  }
+  $("sharedNo").onclick = () => {
+    $("shared").hidden = true;
+    offer = null;
+    if (P !== null && !won) startTimer();
+  };
+  $("sharedPlay").onclick = () => {
+    const o = offer;
+    if (o === null) return;
+    $("shared").hidden = true;
+    offer = null;
+    replay(o.puzzle, o.board.d, { sender: o.board.sender });
+  };
+
   // ---------- 備考と印（ナンとの合意 2026-10-23） ----------
   /** 備考（「難」の印と文）を el の後ろに足す。文は textContent で入れる（HTML として扱わない） */
   function appendRemark(el: HTMLElement, note: RecordNote): void {
@@ -745,11 +902,22 @@ export function startApp(doc: Document, env: AppEnv): App {
       ? `<tr class="noteRow"><td></td><td colspan="5" class="remark" data-k="${key}"></td></tr>`
       : "";
   }
-  /** 表を作ったあとで、備考の行に「難」と文を、書く欄に今の文を入れる */
+  /** 新しい順の 1 行のあとに足す、もらった盤面の行。文は表を作ったあとで入れる（fillNotes） */
+  function receivedRow(key: string): string {
+    return receivedBoards.has(key)
+      ? `<tr class="noteRow"><td></td><td colspan="5" class="receivedNote" data-k="${key}"></td></tr>`
+      : "";
+  }
+  /** 表を作ったあとで、備考の行に「難」と文を、もらった盤面の行に送ってくれた人のタイムを、書く欄に今の文を入れる */
   function fillNotes(): void {
     for (const el of recList.querySelectorAll<HTMLElement>("td.remark")) {
       const note = notes.get(el.dataset.k ?? "");
       if (note !== undefined) appendRemark(el, note);
+    }
+    for (const el of recList.querySelectorAll<HTMLElement>("td.receivedNote")) {
+      const sender = receivedBoards.get(el.dataset.k ?? "")?.sender ?? null;
+      el.textContent =
+        sender === null ? "もらった盤面" : `もらった盤面（送ってくれた人 ${scoreLabel(sender)}）`;
     }
     const input = editorInput();
     if (input === null) editingKey = null;
@@ -758,11 +926,14 @@ export function startApp(doc: Document, env: AppEnv): App {
       input.value = editorShown;
     }
   }
-  function playCell(n: number, d: number, code: string | null): string {
-    // 符号は base64url の文字だけなので、属性にそのまま書ける
+  /**
+   * 「遊ぶ」と「送る」のセル。スマホの幅に収まるよう、2 つを縦に並べる。t と h は、送るときに付けるタイムとヒントの回数。
+   * 符号は base64url の文字だけなので、属性にそのまま書ける
+   */
+  function actsCell(n: number, d: number, code: string | null, t: number, h: number): string {
     return code === null
       ? "<td></td>"
-      : `<td><button type="button" class="play" data-n="${n}" data-d="${d}" data-b="${code}">遊ぶ</button></td>`;
+      : `<td class="acts"><button type="button" class="play" data-n="${n}" data-d="${d}" data-b="${code}">遊ぶ</button><button type="button" class="send" data-n="${n}" data-d="${d}" data-b="${code}" data-t="${t}" data-h="${h}">送る</button></td>`;
   }
   /** 記録の一覧。新しい順は 1 回 1 行で、同じ盤面の前回（初めての盤面は、同じ盤面・難しさの前回）との比べを付ける */
   function renderList(): void {
@@ -791,7 +962,7 @@ export function startApp(doc: Document, env: AppEnv): App {
                 ? `<span class="slower">+${fmt(df)}</span>`
                 : "±0:00";
         const ax = note?.autoX === true ? '<span class="sub">自動×</span>' : "";
-        l += `<tr><td class="edit"><button type="button" class="noteBtn" data-k="${k}" aria-label="備考を書く" aria-expanded="${editingKey === k}">✎</button></td><td>${ds}</td>${boardCell(h.n, h.d, id, nth)}<td>${fmt(h.t)}<span class="sub df">${c}</span></td><td>${h.h}${ax}</td>${playCell(h.n, h.d, code)}</tr>${noteRow(k, note)}`;
+        l += `<tr><td class="edit"><button type="button" class="noteBtn" data-k="${k}" aria-label="備考を書く" aria-expanded="${editingKey === k}">✎</button></td><td>${ds}</td>${boardCell(h.n, h.d, id, nth)}<td>${fmt(h.t)}<span class="sub df">${c}</span></td><td>${h.h}${ax}</td>${actsCell(h.n, h.d, code, h.t, h.h)}</tr>${receivedRow(k)}${noteRow(k, note)}`;
       }
     } else {
       const res = boardRows(records, boards, filter, sort, listLimit, notes);
@@ -800,7 +971,7 @@ export function startApp(doc: Document, env: AppEnv): App {
       l =
         '<table><thead><tr><th class="board">盤面</th><th>初回</th><th>ベスト</th><th>回数</th><th>最少<br>ヒント</th><th></th></tr></thead><tbody>';
       for (const g of res.rows)
-        l += `<tr>${boardCell(g.n, g.d, g.id, 1, g.hard)}<td>${fmt(g.first)}</td><td>${fmt(g.best)}</td><td>${g.count}</td><td>${g.minHints}</td>${playCell(g.n, g.d, g.code)}</tr>`;
+        l += `<tr>${boardCell(g.n, g.d, g.id, 1, g.hard)}<td>${fmt(g.first)}</td><td>${fmt(g.best)}</td><td>${g.count}</td><td>${g.minHints}</td>${actsCell(g.n, g.d, g.code, g.first, g.firstHints)}</tr>`;
     }
     $("recList").innerHTML =
       count > 0
@@ -864,6 +1035,22 @@ export function startApp(doc: Document, env: AppEnv): App {
     }
     replay(p, d);
   });
+  // 記録の一覧の「送る」。新しい順はその回の、盤面ごとの並びは初回のタイムとヒントの回数を付ける（行に書いてある）
+  $("recList").addEventListener("click", (e) => {
+    const btn = (e.target as Element | null)?.closest<HTMLButtonElement>("button.send");
+    if (btn === null || btn === undefined) return;
+    disarmPlay();
+    const { n, d, b, t, h } = btn.dataset;
+    sendBoard(
+      {
+        n: Number(n),
+        d: Number(d),
+        code: b ?? "",
+        sender: { time: Number(t), hints: Number(h) },
+      },
+      showPlayMessage,
+    );
+  });
   function renderKeep(): void {
     $("recKeep").textContent = persistMessage(persistState);
   }
@@ -910,10 +1097,14 @@ export function startApp(doc: Document, env: AppEnv): App {
     records = [];
     boards = new Map();
     notes = new Map();
+    receivedBoards = new Map();
     editingKey = null;
-    // 記録を先に消す（盤面の形や備考だけが残っても害は無い）
+    // 記録を先に消す（盤面の形や備考、もらった盤面の印だけが残っても害は無い）
     markSaved(
-      env.store.saveRecords(records) && env.store.saveBoards(boards) && env.store.saveNotes(notes),
+      env.store.saveRecords(records) &&
+        env.store.saveBoards(boards) &&
+        env.store.saveNotes(notes) &&
+        env.store.saveReceived(receivedBoards),
     );
     renderHist();
   };
@@ -928,7 +1119,10 @@ export function startApp(doc: Document, env: AppEnv): App {
     commitMemos();
     syncFromStore();
     const now = new Date(env.now());
-    env.download(exportFileName(now), exportText({ solvedCount, records, boards, notes }, now));
+    env.download(
+      exportFileName(now),
+      exportText({ solvedCount, records, boards, notes, received: receivedBoards }, now),
+    );
   };
   $("recImport").onclick = () => recFile.click();
   recFile.onchange = () => {
@@ -950,14 +1144,19 @@ export function startApp(doc: Document, env: AppEnv): App {
     }
     commitMemos();
     syncFromStore();
-    const { data: merged, added } = importRecords({ solvedCount, records, boards, notes }, data);
+    const { data: merged, added } = importRecords(
+      { solvedCount, records, boards, notes, received: receivedBoards },
+      data,
+    );
     const next = [...merged.records];
     const nextBoards = new Map(merged.boards);
     const nextNotes = new Map(merged.notes);
-    // 盤面の形と備考を先に保存する（記録の保存に失敗しても、盤面の形や備考が余るだけで害は無い）
+    const nextReceived = new Map(merged.received);
+    // 盤面の形、備考、もらった盤面の印を先に保存する（記録の保存に失敗しても、それらが余るだけで害は無い）
     if (
       !env.store.saveBoards(nextBoards) ||
       !env.store.saveNotes(nextNotes) ||
+      !env.store.saveReceived(nextReceived) ||
       !env.store.saveRecords(next)
     ) {
       showImportMessage(IMPORT_MESSAGES.saveFailed);
@@ -966,6 +1165,7 @@ export function startApp(doc: Document, env: AppEnv): App {
     records = next;
     boards = nextBoards;
     notes = nextNotes;
+    receivedBoards = nextReceived;
     solvedCount = merged.solvedCount;
     $("solved").textContent = String(solvedCount);
     save();
@@ -1058,8 +1258,12 @@ export function startApp(doc: Document, env: AppEnv): App {
     elapsed = saved.playing.elapsed;
     hints = saved.playing.hints;
     autoXUsed = saved.playing.autoXUsed;
+    received = saved.playing.received;
     setPuzzle(saved.playing.puzzle, saved.playing.puzzle.diff, true);
   } else newPuzzle();
+  // 送られてきた盤面のリンクで開いたら、遊びかけの盤面の上に案内を出す
+  openLink(env.takeLink());
+  env.onLinkChange(() => openLink(env.takeLink()), stopped.signal);
   renderKeep();
   checkPersist();
   env.onStorageChange(() => {

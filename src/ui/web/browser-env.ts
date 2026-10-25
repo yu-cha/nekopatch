@@ -3,6 +3,7 @@ import { generate, type Puzzle } from "../../core/index.ts";
 import type { AppEnv } from "./app.ts";
 import type { PersistApi } from "./persistence.ts";
 import { type KeyValue, MAIN_KEYS, SaveStore, TRIAL_KEYS, trialStorage } from "./save-store.ts";
+import { shareOrCopy, takeLink } from "./share.ts";
 
 export function createBrowserEnv(win: Window, trial: boolean): AppEnv {
   const now = () => Date.now();
@@ -38,6 +39,13 @@ export function createBrowserEnv(win: Window, trial: boolean): AppEnv {
     },
     now,
     confirm: (message) => win.confirm(message),
+    pageUrl: `${win.location.origin}${win.location.pathname}`,
+    takeLink: () => takeLink(win),
+    onLinkChange(listener, signal) {
+      // ページを開いたまま、# の後ろだけが違うリンクを開いたときに届く
+      win.addEventListener("hashchange", listener, { signal });
+    },
+    share: (text) => shareOrCopy(win.navigator, text),
   };
 }
 

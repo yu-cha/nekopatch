@@ -80,7 +80,7 @@ export function readNoteFields(x: Readonly<Record<string, unknown>>): {
 }
 
 /** 記録の鍵（日時|盤面|難しさ|タイム|ヒントの回数）の形か */
-function isRecordKey(key: string): boolean {
+export function isRecordKey(key: string): boolean {
   const parts = key.split("|");
   return (
     parts.length === 5 &&

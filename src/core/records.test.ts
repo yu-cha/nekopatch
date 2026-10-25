@@ -18,6 +18,7 @@ import {
   serializeHistory,
   summarize,
 } from "./records.ts";
+import type { Received } from "./share.ts";
 import { rec } from "./test-support.ts";
 
 const A = rec(1761000000000, 6, 1, 90000, 1);
@@ -480,6 +481,92 @@ describe("備考と印の書き出しと読み込み", () => {
     expect(boardRows([a1, a2, b1], boards, null, "slow", 30).rows.map((r) => r.hard)).toEqual([
       false,
       false,
+    ]);
+  });
+});
+
+describe("もらった盤面の印の書き出しと読み込み", () => {
+  const receivedOf = (entries: [ClearRecord, Received][]) =>
+    new Map(entries.map(([r, v]) => [recordKey(r), v]));
+
+  it("もらった盤面の記録は、書き出したファイルの行に received が入り、読むと戻る", () => {
+    const data: RecordsData = {
+      solvedCount: 3,
+      records: [A, B, C],
+      boards: boardsOf([[B, XB]]),
+      received: receivedOf([
+        [B, { sender: { time: 205000, hints: 0 } }],
+        [C, { sender: null }],
+      ]),
+    };
+    const text = exportText(data, new Date("2026-10-25T01:00:00Z"));
+    expect(parseExport(text)).toEqual(data);
+    expect(JSON.parse(text).version).toBe(1);
+    const lines = text.split("\n").filter((l) => l.includes('"at"'));
+    expect(lines).toEqual([
+      `    ${JSON.stringify(A)},`,
+      `    ${JSON.stringify({ ...B, b: XB, received: { senderTime: 205000, senderHints: 0 } })},`,
+      `    ${JSON.stringify({ ...C, received: {} })}`,
+    ]);
+  });
+
+  it("もらった盤面の印が読めない行があれば、何も読み込まない", () => {
+    for (const received of [
+      { senderTime: -1, senderHints: 0 },
+      { senderTime: 1000 },
+      [],
+      null,
+      "x",
+    ]) {
+      const file = {
+        format: "nekopatch-records",
+        version: 1,
+        solvedCount: 1,
+        records: [A, { ...B, received }],
+      };
+      expect(parseExport(JSON.stringify(file))).toBeNull();
+    }
+  });
+
+  it("読み込むと、もらった盤面の印を足す（今にあれば今のまま）", () => {
+    const current: RecordsData = {
+      solvedCount: 2,
+      records: [A, B],
+      boards: new Map(),
+      received: receivedOf([[A, { sender: { time: 1000, hints: 1 } }]]),
+    };
+    const file: RecordsData = {
+      solvedCount: 3,
+      records: [A, B, C],
+      boards: new Map(),
+      received: receivedOf([
+        [A, { sender: { time: 9000, hints: 9 } }],
+        [C, { sender: null }],
+      ]),
+    };
+    expect(importRecords(current, file).data.received).toEqual(
+      receivedOf([
+        [A, { sender: { time: 1000, hints: 1 } }],
+        [C, { sender: null }],
+      ]),
+    );
+  });
+
+  it("盤面ごとの並びは、初回のタイムとヒントの回数を持つ", () => {
+    const a1 = rec(1761300000000, 8, 2, 300000, 2);
+    const a2 = rec(1761300060000, 8, 2, 90000, 0);
+    const rows = boardRows(
+      [a1, a2],
+      boardsOf([
+        [a1, XA],
+        [a2, XA],
+      ]),
+      null,
+      "slow",
+      30,
+    ).rows;
+    expect(rows.map((r) => [r.first, r.firstHints, r.best, r.minHints])).toEqual([
+      [300000, 2, 90000, 0],
     ]);
   });
 });

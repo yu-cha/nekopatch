@@ -337,14 +337,16 @@ button:disabled {
   background: color-mix(in srgb, var(--bg) 70%, transparent);
   border-radius: 10px;
 }
-#win {
+#win,
+#shared {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-#win .card {
+#win .card,
+#shared .card {
   background: var(--panel);
   border: 2px solid var(--edge);
   border-radius: 16px;
@@ -356,13 +358,15 @@ button:disabled {
   align-items: center;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
 }
-#win h2 {
+#win h2,
+#shared h2 {
   font-family: var(--display);
   font-weight: 400;
   margin: 0;
   font-size: 1.6rem;
 }
-#win p {
+#win p,
+#shared p {
   margin: 0;
   color: var(--muted);
 }
@@ -607,4 +611,35 @@ button:disabled {
   font-size: 0.85rem;
   font-weight: 700;
   color: var(--fg);
+}
+/* ---- ここから、2026-10-25 に足した部品（盤面をほかの人と共有する） ---- */
+/* 送られてきた盤面の案内（クリアの画面と同じく、盤面の上に重ねる） */
+#shared #sharedBoard {
+  font-weight: 700;
+  color: var(--fg);
+}
+#shared #sharedBusy {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--bad);
+}
+/* クリアの画面の、送ってくれた人との比べと、送ったあとの知らせ */
+#win #winVersus {
+  font-size: 0.95rem;
+  color: var(--fg);
+}
+#win #winShareMsg {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--fg);
+}
+/* 記録の一覧の「遊ぶ」と「送る」。スマホの幅（360px）に収まるよう、縦に並べる */
+.rec td.acts button {
+  display: block;
+  width: 100%;
+  padding: 3px 8px;
+  font-size: 0.8rem;
+}
+.rec td.acts button + button {
+  margin-top: 3px;
 }
