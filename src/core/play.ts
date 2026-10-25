@@ -19,7 +19,7 @@ export const REGION_NAMES: readonly string[] = [
 ];
 
 /** 難しさの名前（1〜3） */
-export const LEVEL_NAMES: readonly string[] = ["", "かんたん", "ふつう", "むずかしい"];
+export const LEVEL_NAMES: readonly string[] = ["", "簡単", "普通", "難しい"];
 
 /** 盤面の大きさとして選べるもの */
 export const SIZES: readonly number[] = [6, 7, 8, 9, 10];

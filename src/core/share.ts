@@ -60,7 +60,7 @@ export function shareLink(pageUrl: string, b: SharedBoard): string {
   return `${pageUrl}?${OPEN_EXTERNAL}#${shareFragment(b)}`;
 }
 
-/** 盤面の大きさと難しさ（「8×8・ふつう」） */
+/** 盤面の大きさと難しさ（「8×8・普通」） */
 export function boardLabel(n: number, d: number): string {
   return `${n}×${n}・${LEVEL_NAMES[d] ?? ""}`;
 }

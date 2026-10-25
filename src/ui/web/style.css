@@ -633,17 +633,90 @@ button:disabled {
   font-weight: 700;
   color: var(--fg);
 }
-/* 記録の一覧の「遊ぶ」と「送る」。スマホの幅（360px）に収まるよう、縦に並べる */
+/* 記録の一覧の「遊ぶ」と「送る」。1 件を 2 行に収めるよう、「遊」「送」の 1 文字にして横に並べる（2026-10-25） */
+.rec td.acts {
+  white-space: nowrap;
+}
 .rec td.acts button {
-  display: block;
-  width: 100%;
-  padding: 3px 8px;
+  padding: 3px 7px;
   font-size: 0.8rem;
 }
 .rec td.acts button + button {
-  margin-top: 3px;
+  margin-left: 4px;
+}
+/* 遊んでいる途中に「遊」を押したとき（もう一度押すと始まる） */
+.rec td.acts button.armed {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
 }
 /* もらった盤面の印（盤面 ID の横） */
 .rec .sub .gift {
   margin-left: 4px;
+}
+/* ---- ここから、2026-10-25 に足した部品（記録の一覧に年と詳しい情報） ---- */
+/* 新しい順の一覧の、年の見出しの行 */
+.rec #recList tr.yearRow th {
+  text-align: left;
+  color: var(--accent);
+  padding: 10px 4px 3px;
+  border-bottom: 2px solid var(--accent);
+}
+/* 盤面の欄のボタン。枠の無い文字に見せ、▾ で開けることを示す。開いているときは色を付ける */
+.rec #recList .boardBtn {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 2px 3px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.rec #recList .boardBtn[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.rec .sub .fold {
+  margin-left: 3px;
+  color: var(--accent);
+}
+/* 盤面の詳しい情報（行の下に開く） */
+.rec #recList tbody tr.detailRow > td {
+  padding: 0 0 8px;
+  text-align: left;
+  white-space: normal;
+}
+.rec #recList .detail {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border-radius: 8px;
+  padding: 4px 6px 6px;
+}
+.rec #recList .detail table {
+  font-size: 0.82rem;
+}
+.rec #recList .detail table tr td {
+  padding: 4px 3px;
+  border-bottom: 1px dashed var(--line);
+}
+.rec #recList .detail tr.me td {
+  font-weight: 700;
+}
+.rec #recList .detail tr.dgift td,
+.rec #recList .detail tr.dnote td {
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  padding-top: 0;
+}
+/* 備考ともらった盤面の行が、上の回の行と 1 つに見えるよう、上の行の下線を消す */
+.rec #recList .detail tr:has(+ tr.dgift) td,
+.rec #recList .detail tr:has(+ tr.dnote) td {
+  border-bottom: none;
+}
+.rec #recList .detailBtns {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
 }

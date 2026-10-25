@@ -101,7 +101,7 @@ describe("送るリンクと文", () => {
   it("送る文は 3 行で、盤面 ID、大きさ・難しさ、タイムとヒント、リンクだけを入れる", () => {
     const b = { n: 8, d: 2, code: code8, sender: { time: 205800, hints: 0, autoX: false } };
     expect(shareText(PAGE, b).split("\n")).toEqual([
-      `ねこパッチの盤面 ${boardId(8, code8)}（8×8・ふつう）`,
+      `ねこパッチの盤面 ${boardId(8, code8)}（8×8・普通）`,
       "3:25・ヒント 0 回でクリア。挑戦してみて！",
       `${PAGE}?openExternalBrowser=1#n=8&d=2&b=${code8}&t=205&h=0`,
     ]);

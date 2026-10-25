@@ -382,6 +382,36 @@ export function boardRows(
   return { rows: all.slice(0, limit), more: all.length > limit };
 }
 
+/** 盤面の詳しい情報の 1 回 */
+export interface BoardPlay {
+  readonly record: ClearRecord;
+  /** その盤面の何回目か */
+  readonly nth: number;
+  /** 前の回とのタイムの差（遅ければ正）。1 回目は null */
+  readonly diff: number | null;
+}
+
+/**
+ * 盤面の詳しい情報。大きさ n・難しさ d・符号 code の盤面の記録を、日時の順（保存の順）に、
+ * 何回目かと前の回との差を付けて返す（新しい順の行の「2回目」・前回比と同じ数え方）
+ */
+export function boardPlays(
+  records: readonly ClearRecord[],
+  boards: Boards,
+  n: number,
+  d: number,
+  code: string,
+): BoardPlay[] {
+  const plays: BoardPlay[] = [];
+  let prev: number | null = null;
+  for (const record of records) {
+    if (record.n !== n || record.d !== d || boards.get(recordKey(record)) !== code) continue;
+    plays.push({ record, nth: plays.length + 1, diff: prev === null ? null : record.t - prev });
+    prev = record.t;
+  }
+  return plays;
+}
+
 /** クリアしたときの比べ */
 export type WinComparison =
   /** 初めての盤面。同じ盤面・難しさの、初めて遊んだ記録と比べる */

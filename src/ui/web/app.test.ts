@@ -40,6 +40,8 @@ const $ = (id: string) => {
 };
 const text = (id: string) => $(id).textContent ?? "";
 const click = (id: string) => $(id).click();
+/** 記録の一覧の、記録（盤面）の行と備考の行。年の見出しの行、詳しい情報の行と、その中の表の行は入れない */
+const LIST_ROWS = "#recList > table > tbody > tr:not(.yearRow):not(.detailRow)";
 
 /** 2026-10-22 10:00（日本の時刻で書き出しのファイル名が決まるよう、その土地の時刻で作る） */
 const TODAY = new Date(2026, 9, 22, 10, 0).getTime();
@@ -260,7 +262,7 @@ describe("記録を数の上限なく残す", () => {
     expect(saved[500]).toMatchObject({ n: 8, d: 2, t: 120000 });
 
     click("recBtn");
-    const row = summaryRows().find((r) => r[0] === "8×8 ふつう");
+    const row = summaryRows().find((r) => r[0] === "8×8 普通");
     expect(row?.[1]).toBe("501");
     expect(row?.[3]).toBe("0:30");
   });
@@ -272,10 +274,10 @@ describe("今までの記録を引き継ぐ", () => {
     expect(text("solved")).toBe("812");
     click("recBtn");
     expect(summaryRows()).toEqual([
-      ["6×6 かんたん", "2", "1:27", "1:20", "1:20", "0.5"],
-      ["8×8 ふつう", "1", "3:20", "3:20", "3:20", "2.0"],
+      ["6×6 簡単", "2", "1:27", "1:20", "1:20", "0.5"],
+      ["8×8 普通", "1", "3:20", "3:20", "3:20", "2.0"],
     ]);
-    expect(document.querySelectorAll("#recList tbody tr")).toHaveLength(3);
+    expect(document.querySelectorAll(LIST_ROWS)).toHaveLength(3);
   });
 
   it("作り直す前の遊びかけの盤面を、続きから遊べる", async () => {
@@ -334,11 +336,11 @@ describe("ほかのタブで増えた記録を消さない", () => {
     const kv = threeRecords();
     const h = await start({ kv });
     click("recBtn");
-    expect(document.querySelectorAll("#recList tbody tr")).toHaveLength(3);
+    expect(document.querySelectorAll(LIST_ROWS)).toHaveLength(3);
 
     otherTabClears(kv, 813);
     h.notifyOtherTab();
-    expect(document.querySelectorAll("#recList tbody tr")).toHaveLength(4);
+    expect(document.querySelectorAll(LIST_ROWS)).toHaveLength(4);
     expect(text("solved")).toBe("813");
   });
 
@@ -535,7 +537,7 @@ describe("記録を読み込む", () => {
     await importFile(h, file);
     expect(text("recImportMsg")).toBe(IMPORT_MESSAGES.saveFailed);
     expect(storedRecords(kv)).toEqual([C]);
-    expect(document.querySelectorAll("#recList tbody tr")).toHaveLength(1);
+    expect(document.querySelectorAll(LIST_ROWS)).toHaveLength(1);
   });
 });
 
@@ -547,8 +549,8 @@ describe("確かめ用のページ", () => {
     expect(text("solved")).toBe("812");
     click("recBtn");
     expect(summaryRows().map((r) => r.slice(0, 2))).toEqual([
-      ["6×6 かんたん", "2"],
-      ["8×8 ふつう", "1"],
+      ["6×6 簡単", "2"],
+      ["8×8 普通", "1"],
     ]);
     expect(kv.getItem(MAIN_KEYS.history)).toBe(before.get(MAIN_KEYS.history));
     expect(kv.getItem(MAIN_KEYS.game)).toBe(before.get(MAIN_KEYS.game));
@@ -629,19 +631,19 @@ function withBoards(
 
 /** 一覧の行（セルの文字） */
 function listRows(): string[][] {
-  return [...document.querySelectorAll("#recList tbody tr")].map((tr) =>
+  return [...document.querySelectorAll(LIST_ROWS)].map((tr) =>
     [...tr.querySelectorAll("td")].map((td) => td.textContent ?? ""),
   );
 }
 /** 一覧の行の盤面 ID */
 function listIds(): string[] {
-  return [...document.querySelectorAll("#recList tbody tr")].map(
+  return [...document.querySelectorAll(LIST_ROWS)].map(
     (tr) => tr.querySelector(".bid")?.textContent ?? "",
   );
 }
 /** 新しい順の一覧の行の、タイムと前回比（列は ✎、日時、盤面、タイム、ヒント、遊ぶ） */
 function listTimes(): [string, string][] {
-  return [...document.querySelectorAll("#recList tbody tr")].map((tr) => {
+  return [...document.querySelectorAll(LIST_ROWS)].map((tr) => {
     const cell = tr.querySelectorAll("td")[3];
     return [cell?.firstChild?.textContent ?? "", cell?.querySelector(".df")?.textContent ?? ""];
   });
@@ -651,7 +653,7 @@ function playButtons(): HTMLButtonElement[] {
 }
 /** 一覧で、盤面 ID が id の最初の行の「遊ぶ」を押す */
 function clickPlay(id: string): void {
-  const row = [...document.querySelectorAll("#recList tbody tr")].find(
+  const row = [...document.querySelectorAll(LIST_ROWS)].find(
     (tr) => tr.querySelector(".bid")?.textContent === id,
   );
   const btn = row?.querySelector<HTMLButtonElement>("button.play");
@@ -743,7 +745,7 @@ describe("盤面 ID で盤面を見分ける", () => {
     });
     click("recBtn");
     expect(listIds()).toEqual([idOf(PA), "—"]);
-    const rows = [...document.querySelectorAll("#recList tbody tr")];
+    const rows = [...document.querySelectorAll(LIST_ROWS)];
     expect(rows.map((tr) => tr.querySelector("button.play") !== null)).toEqual([true, false]);
   });
 });
@@ -856,7 +858,7 @@ describe("もう一度遊んだ記録は、成績の表とクリアの数に数�
     clickPlay(idOf(PA));
     solveTaking(h, 90000);
     expect(storedRecords(kv)).toHaveLength(3);
-    expect(summaryRows()).toEqual([["8×8 ふつう", "2", "4:00", "3:00", "3:00", "0.0"]]);
+    expect(summaryRows()).toEqual([["8×8 普通", "2", "4:00", "3:00", "3:00", "0.0"]]);
   });
 
   it("もう一度遊んでクリアしても、クリアの数は増えない", async () => {
@@ -889,7 +891,7 @@ describe("もう一度遊んだ記録は、成績の表とクリアの数に数�
       ]),
     });
     click("recBtn");
-    expect(summaryRows().map((r) => r.slice(0, 3))).toEqual([["8×8 ふつう", "2", "2:30"]]);
+    expect(summaryRows().map((r) => r.slice(0, 3))).toEqual([["8×8 普通", "2", "2:30"]]);
   });
 });
 
@@ -939,9 +941,18 @@ describe("記録の一覧を並べ替え、絞り込み、さかのぼる", () =
       [play(2, 90000, 0), PA],
     ]);
   }
-  /** 盤面ごとの行の、盤面 ID と、初回・ベスト・回数・最少ヒント */
+  /** 盤面ごとの並びの行（盤面 ID、初回、ベスト、回数、最少ヒント）。初回は、ベストの欄の下の段にある */
   function boardList(): string[][] {
-    return listRows().map((cells, i) => [listIds()[i] ?? "", ...cells.slice(1, 5)]);
+    return [...document.querySelectorAll(LIST_ROWS)].map((tr) => {
+      const [, best, count, hints] = [...tr.querySelectorAll(":scope > td")];
+      return [
+        tr.querySelector(".bid")?.textContent ?? "",
+        best?.querySelector(".sub")?.textContent ?? "",
+        best?.firstChild?.textContent ?? "",
+        count?.textContent ?? "",
+        hints?.textContent ?? "",
+      ];
+    });
   }
 
   it("盤面ごとに、ベストの遅い順に並べる", async () => {
@@ -1234,7 +1245,7 @@ function typeInto(input: HTMLElement, value: string, change = true): void {
 }
 /** 新しい順の一覧で、記録 r の行 */
 function recordRow(r: ClearRecord): HTMLTableRowElement {
-  const row = [...document.querySelectorAll<HTMLTableRowElement>("#recList tbody tr")].find(
+  const row = [...document.querySelectorAll<HTMLTableRowElement>(LIST_ROWS)].find(
     (tr) => tr.querySelector<HTMLElement>("button.noteBtn")?.dataset.k === recordKey(r),
   );
   if (row === undefined) throw new Error(`${recordKey(r)} の行がありません`);
@@ -1395,7 +1406,7 @@ describe("記録の一覧から備考を書き直す", () => {
     await start({ kv });
     click("recBtn");
     // 一番下の行が、6×6 かんたんの古い方（A）
-    const rows = document.querySelectorAll<HTMLElement>("#recList tbody tr button.noteBtn");
+    const rows = document.querySelectorAll<HTMLElement>(`${LIST_ROWS} button.noteBtn`);
     expect(rows[rows.length - 1]?.dataset.k).toBe(recordKey(A));
     clickNote(A);
     expect(document.activeElement).toBe(editor());
@@ -1470,7 +1481,7 @@ describe("備考を記録の一覧に出す", () => {
       ),
     });
     click("recBtn");
-    const rows = [...document.querySelectorAll<HTMLElement>("#recList tbody tr")].map((tr) =>
+    const rows = [...document.querySelectorAll<HTMLElement>(LIST_ROWS)].map((tr) =>
       tr.classList.contains("noteRow")
         ? `備考 ${tr.textContent}`
         : `記録 ${tr.querySelector<HTMLElement>(".noteBtn")?.dataset.k}`,
@@ -1512,7 +1523,7 @@ describe("備考を記録の一覧に出す", () => {
     await start({ kv });
     click("recBtn");
     choose("recSort", "slow");
-    const marks = [...document.querySelectorAll("#recList tbody tr")].map((tr) => [
+    const marks = [...document.querySelectorAll(LIST_ROWS)].map((tr) => [
       tr.querySelector(".bid")?.textContent,
       tr.querySelector(".hard")?.textContent ?? "",
     ]);
@@ -1570,7 +1581,7 @@ describe("自動×を使ったかの印を残す", () => {
     const h = await start({ kv });
     setAutoX(true);
     solveTaking(h, 65000);
-    expect(text("winText")).toMatch(/^8×8・ふつう　タイム 1:05　ヒント \d+回　自動×$/);
+    expect(text("winText")).toMatch(/^8×8・普通　タイム 1:05　ヒント \d+回　自動×$/);
     const [r] = storedRecords(kv);
     if (r === undefined) throw new Error("記録がありません");
     expect(storedNotes(kv)).toEqual({ [recordKey(r)]: { autoX: true } });
@@ -1639,7 +1650,7 @@ describe("自動×を使ったかの印を残す", () => {
     solveTaking(h, 180000);
     expect(text("winCompare")).toContain("前回より 2:00 速い　平均 4:00（2回）");
     click("recBtn");
-    expect(summaryRows().find((r) => r[0] === "8×8 ふつう")?.[1]).toBe("2");
+    expect(summaryRows().find((r) => r[0] === "8×8 普通")?.[1]).toBe("2");
   });
 });
 
@@ -1751,9 +1762,7 @@ describe("備考と印を書き出し・読み込みで移す", () => {
       ),
     });
     click("recBtn");
-    const rowsBefore = [...document.querySelectorAll("#recList tbody tr")].map(
-      (tr) => tr.textContent,
-    );
+    const rowsBefore = [...document.querySelectorAll(LIST_ROWS)].map((tr) => tr.textContent);
     click("recExport");
     const fileText = first.downloads[0]?.text ?? "";
     first.app.stop();
@@ -1762,9 +1771,7 @@ describe("備考と印を書き出し・読み込みで移す", () => {
     const h = await start({ kv: new MemoryStorage() });
     click("recBtn");
     await importFile(h, fileText);
-    const rowsAfter = [...document.querySelectorAll("#recList tbody tr")].map(
-      (tr) => tr.textContent,
-    );
+    const rowsAfter = [...document.querySelectorAll(LIST_ROWS)].map((tr) => tr.textContent);
     expect(rowsAfter).toEqual(rowsBefore);
     expect(hintSubOf(r2)).toBe("自動×");
     expect(remarkOf(r1)).toBe("難 左下で迷った");
@@ -1982,7 +1989,7 @@ describe("盤面を送る文とリンク", () => {
     click("winShare");
     await h.app.whenIdle();
     expect(lastShared(h)).toEqual([
-      `ねこパッチの盤面 ${idOf(p)}（8×8・ふつう）`,
+      `ねこパッチの盤面 ${idOf(p)}（8×8・普通）`,
       "3:25・ヒント 0 回でクリア。挑戦してみて！",
       `${PAGE}?openExternalBrowser=1#n=8&d=2&b=${codeOf(p)}&t=205&h=0`,
     ]);
@@ -2013,7 +2020,7 @@ describe("盤面を送る場所", () => {
     click("shareBtn");
     await h.app.whenIdle();
     expect(lastShared(h)).toEqual([
-      `ねこパッチの盤面 ${idOf(p)}（8×8・ふつう）`,
+      `ねこパッチの盤面 ${idOf(p)}（8×8・普通）`,
       "これ解ける？",
       `${PAGE}?openExternalBrowser=1#n=8&d=2&b=${codeOf(p)}`,
     ]);
@@ -2047,7 +2054,7 @@ describe("盤面を送る場所", () => {
     });
     click("recBtn");
     choose("recSort", "slow");
-    const [row] = document.querySelectorAll("#recList tbody tr");
+    const [row] = document.querySelectorAll(LIST_ROWS);
     if (row === undefined) throw new Error("行がありません");
     clickSend(row);
     await h.app.whenIdle();
@@ -2081,7 +2088,7 @@ describe("盤面を送る場所", () => {
     expect(link?.endsWith("&t=90&h=0&x=1")).toBe(true);
     // 盤面ごとの並びからは、初回の記録の自動×を付ける
     choose("recSort", "slow");
-    const [row] = document.querySelectorAll("#recList tbody tr");
+    const [row] = document.querySelectorAll(LIST_ROWS);
     if (row === undefined) throw new Error("行がありません");
     clickSend(row);
     await h.app.whenIdle();
@@ -2151,7 +2158,7 @@ describe("リンクを開くと、送られてきた盤面の案内を出す", (
     await start({ link: linkOf(PA) });
     expect($("shared").hidden).toBe(false);
     expect($("shared").querySelector("h2")?.textContent).toBe("送られてきた盤面");
-    expect(text("sharedBoard")).toBe(`8×8・ふつう　${idOf(PA)}`);
+    expect(text("sharedBoard")).toBe(`8×8・普通　${idOf(PA)}`);
     expect($("sharedSender").hidden).toBe(false);
     expect(text("sharedSender")).toBe("送ってくれた人: 3:25・ヒント 0 回");
     expect($("sharedBusy").hidden).toBe(true);
@@ -2163,7 +2170,7 @@ describe("リンクを開くと、送られてきた盤面の案内を出す", (
   it("タイムの無いリンクでは、送ってくれた人のタイムを出さない", async () => {
     await start({ link: linkOf(PA, null) });
     expect($("shared").hidden).toBe(false);
-    expect(text("sharedBoard")).toBe(`8×8・ふつう　${idOf(PA)}`);
+    expect(text("sharedBoard")).toBe(`8×8・普通　${idOf(PA)}`);
     expect($("sharedSender").hidden).toBe(true);
   });
 
@@ -2234,7 +2241,7 @@ describe("リンクを開くと、送られてきた盤面の案内を出す", (
     expect($("shared").hidden).toBe(true);
     await h.openLink(linkOf(PA));
     expect($("shared").hidden).toBe(false);
-    expect(text("sharedBoard")).toBe(`8×8・ふつう　${idOf(PA)}`);
+    expect(text("sharedBoard")).toBe(`8×8・普通　${idOf(PA)}`);
   });
 });
 
@@ -2316,7 +2323,7 @@ describe("もらった盤面の記録は、今までと同じ決まりで数え�
     solveByHand(h, PA, 180000);
     expect(text("solved")).toBe("11");
     click("recBtn");
-    const row = summaryRows().find((r) => r[0] === "8×8 ふつう");
+    const row = summaryRows().find((r) => r[0] === "8×8 普通");
     expect(row?.[1]).toBe("2");
     expect(row?.[2]).toBe("4:00");
   });
@@ -2352,7 +2359,7 @@ describe("記録の一覧に、もらった盤面の印を出す", () => {
     expect(hasGift(recordRow(own))).toBe(false);
     // 送ってくれた人のタイムは一覧に出さず、記録の行の下に行も増えない
     expect($("recList").textContent).not.toContain("3:25");
-    expect(document.querySelectorAll("#recList tbody tr")).toHaveLength(2);
+    expect(document.querySelectorAll(LIST_ROWS)).toHaveLength(2);
   });
 
   it("盤面ごとの並びでは、1 回でももらった盤面に 🎁 を出す", async () => {
@@ -2365,7 +2372,7 @@ describe("記録の一覧に、もらった盤面の印を出す", () => {
     solveByHand(h, PA, 150000);
     click("recBtn");
     choose("recSort", "slow");
-    const rows = [...document.querySelectorAll("#recList tbody tr")];
+    const rows = [...document.querySelectorAll(LIST_ROWS)];
     const rowOf = (p: Puzzle) =>
       rows.find((tr) => tr.querySelector(".bid")?.textContent === idOf(p));
     const rowA = rowOf(PA);
@@ -2526,5 +2533,358 @@ describe("今までの記録を引き継ぐ（もらった盤面の欄）", () =
     const [x = 0] = notSolution(fixedPuzzle(8, 2, 0));
     tapCell(x);
     expect(Object.keys(JSON.parse(kv.getItem(MAIN_KEYS.game) ?? "{}"))).toEqual(OLD_FIELDS);
+  });
+});
+
+// ---------- 記録の一覧に年と詳しい情報（record-details） ----------
+
+/** y 年 m 月 d 日 hh:mm（その土地の時刻。月日と年は、スマホの時刻で決めるため） */
+function localAt(y: number, m: number, d: number, hh = 12, mm = 0): number {
+  return new Date(y, m - 1, d, hh, mm).getTime();
+}
+/** 8×8・ふつう（ほかの大きさ・難しさも指定できる）の、日時 at の記録 */
+function recAt(at: number, t: number, h = 0, n = 8, d = 2): ClearRecord {
+  return { at, n, d, t, h };
+}
+/** 新しい順の一覧を上から。年の見出しの行は「2026年」、記録の行は日時の欄の月日（備考の行は入れない） */
+function listWithYears(): string[] {
+  return [...document.querySelectorAll("#recList > table > tbody > tr:not(.noteRow)")].map((tr) =>
+    tr.classList.contains("yearRow")
+      ? (tr.textContent ?? "")
+      : (tr.querySelectorAll(":scope > td")[1]?.firstChild?.textContent ?? ""),
+  );
+}
+/** 盤面ごとの並びで、盤面 ID が id の行 */
+function boardRowOf(id: string): HTMLTableRowElement {
+  const row = [...document.querySelectorAll<HTMLTableRowElement>(LIST_ROWS)].find(
+    (tr) => tr.querySelector(".bid")?.textContent === id,
+  );
+  if (row === undefined) throw new Error(`${id} の行がありません`);
+  return row;
+}
+/** 行 tr の盤面の欄を押す */
+function openBoard(tr: Element): void {
+  const btn = tr.querySelector<HTMLButtonElement>("td.board button.boardBtn");
+  if (btn === null) throw new Error("盤面の欄が押せません");
+  btn.click();
+}
+/** 出ている詳しい情報の行（無ければ空） */
+function detailRows(): HTMLTableRowElement[] {
+  return [...document.querySelectorAll<HTMLTableRowElement>("#recList tr.detailRow")];
+}
+/** セルの文字を、段（文字と .sub）ごとに空白でつなぐ（「2026/1/3」と「9:30」→「2026/1/3 9:30」） */
+function cellText(el: Element): string {
+  return [...el.childNodes]
+    .map((n) => n.textContent?.trim() ?? "")
+    .filter((s) => s !== "")
+    .join(" ");
+}
+/** 詳しい情報の行を上から。回の行は「1回目 2025/12/30 21:05 5:00 ヒント 2」、備考ともらった盤面の行はその文字 */
+function detailLines(): string[] {
+  const [row] = detailRows();
+  if (row === undefined) throw new Error("詳しい情報が出ていません");
+  return [...row.querySelectorAll(".detail table > tbody > tr")].map((tr) =>
+    [...tr.querySelectorAll(":scope > td")]
+      .map(cellText)
+      .filter((s) => s !== "")
+      .join(" "),
+  );
+}
+
+describe("新しい順の一覧に、年の見出しの行を出す", () => {
+  it("新しい順の一覧で、年が変わるところに年の見出しの行が出る", async () => {
+    await start({
+      kv: withBoards([
+        [recAt(localAt(2025, 12, 30), 300000), null],
+        [recAt(localAt(2026, 1, 3), 200000), null],
+        [recAt(localAt(2026, 2, 10), 100000), null],
+      ]),
+    });
+    click("recBtn");
+    expect(listWithYears()).toEqual(["2026年", "2/10", "1/3", "2025年", "12/30"]);
+  });
+
+  it("もっと見るで出た行にも、年の見出しの行が出る", async () => {
+    const old = Array.from({ length: 5 }, (_, i) => recAt(localAt(2025, 6, 1 + i), 60000));
+    const recent = Array.from({ length: 30 }, (_, i) => recAt(localAt(2026, 3, 1 + i), 60000));
+    await start({ kv: withBoards([...old, ...recent].map((r) => [r, null])) });
+    click("recBtn");
+    const years = () => listWithYears().filter((s) => s.endsWith("年"));
+    expect(years()).toEqual(["2026年"]);
+    expect(document.querySelectorAll(LIST_ROWS)).toHaveLength(30);
+    click("recMore");
+    expect(years()).toEqual(["2026年", "2025年"]);
+    expect(document.querySelectorAll(LIST_ROWS)).toHaveLength(35);
+    const all = listWithYears();
+    expect(all.slice(all.indexOf("2025年"))).toEqual(["2025年", "6/5", "6/4", "6/3", "6/2", "6/1"]);
+  });
+
+  it("盤面ごとの並びには、年の見出しの行は出ない", async () => {
+    await start({
+      kv: withBoards([
+        [recAt(localAt(2025, 12, 30), 300000), PA],
+        [recAt(localAt(2026, 1, 3), 200000), PB],
+      ]),
+    });
+    click("recBtn");
+    expect(document.querySelectorAll("#recList tr.yearRow")).toHaveLength(2);
+    choose("recSort", "slow");
+    expect(document.querySelectorAll("#recList tr.yearRow")).toHaveLength(0);
+    expect(document.querySelectorAll(LIST_ROWS)).toHaveLength(2);
+  });
+});
+
+describe("盤面の欄を押すと、その盤面の詳しい情報を出す", () => {
+  // 8×8・ふつうで、A を 2025/12/30 21:05 に 5:00・ヒント 2、B を 2026/1/2 に 3:00、
+  // A を 2026/1/3 9:30 に 4:30・ヒント 0（自動×）、A を 2026/1/5 22:00 に 4:40・ヒント 1
+  const a1 = recAt(localAt(2025, 12, 30, 21, 5), 300000, 2);
+  const b1 = recAt(localAt(2026, 1, 2), 180000, 0);
+  const a2 = recAt(localAt(2026, 1, 3, 9, 30), 270000, 0);
+  const a3 = recAt(localAt(2026, 1, 5, 22, 0), 280000, 1);
+  function fourPlays(): MemoryStorage {
+    return withBoards(
+      [
+        [a1, PA],
+        [b1, PB],
+        [a2, PA],
+        [a3, PA],
+      ],
+      { [MAIN_KEYS.notes]: JSON.stringify({ [recordKey(a2)]: { autoX: true } }) },
+    );
+  }
+  const playsOfA = [
+    "1回目 2025/12/30 21:05 5:00 ヒント 2",
+    "2回目 2026/1/3 9:30 4:30 −0:30 ヒント 0 自動×",
+    "3回目 2026/1/5 22:00 4:40 +0:10 ヒント 1",
+  ];
+
+  it("盤面ごとの並びで盤面の欄を押すと、その盤面の回ごとの記録が出る", async () => {
+    await start({ kv: fourPlays() });
+    click("recBtn");
+    choose("recSort", "slow");
+    const row = boardRowOf(idOf(PA));
+    openBoard(row);
+    expect(detailRows()).toHaveLength(1);
+    expect(boardRowOf(idOf(PA)).nextElementSibling?.classList.contains("detailRow")).toBe(true);
+    expect(detailLines()).toEqual(playsOfA);
+    expect(
+      boardRowOf(idOf(PA)).querySelector("button.boardBtn")?.getAttribute("aria-expanded"),
+    ).toBe("true");
+  });
+
+  it("新しい順で盤面の欄を押すと、押した行の回を太字にして出す", async () => {
+    await start({ kv: fourPlays() });
+    click("recBtn");
+    openBoard(recordRow(a2));
+    expect(recordRow(a2).nextElementSibling?.classList.contains("detailRow")).toBe(true);
+    expect(detailLines()).toEqual(playsOfA);
+    const bold = [...document.querySelectorAll("#recList tr.detailRow tr.me")];
+    expect(bold.map((tr) => tr.querySelector("td")?.textContent)).toEqual(["2回目"]);
+  });
+
+  it("開くのは 1 つだけで、もう一度押すか閉じるを押すと閉じる", async () => {
+    await start({
+      kv: withBoards([
+        [play(0, 300000), PA],
+        [play(1, 180000), PB],
+      ]),
+    });
+    click("recBtn");
+    choose("recSort", "slow");
+    openBoard(boardRowOf(idOf(PA)));
+    expect(detailRows()).toHaveLength(1);
+    expect(boardRowOf(idOf(PA)).nextElementSibling).toBe(detailRows()[0]);
+
+    openBoard(boardRowOf(idOf(PB)));
+    expect(detailRows()).toHaveLength(1);
+    expect(boardRowOf(idOf(PB)).nextElementSibling).toBe(detailRows()[0]);
+    expect(
+      boardRowOf(idOf(PA)).querySelector("button.boardBtn")?.getAttribute("aria-expanded"),
+    ).toBe("false");
+
+    openBoard(boardRowOf(idOf(PB)));
+    expect(detailRows()).toHaveLength(0);
+
+    openBoard(boardRowOf(idOf(PA)));
+    expect(detailRows()).toHaveLength(1);
+    document.querySelector<HTMLButtonElement>("#recList button.detailClose")?.click();
+    expect(detailRows()).toHaveLength(0);
+  });
+
+  it("並びや絞り込みを変えると、詳しい情報を閉じる", async () => {
+    const r = play(0, 300000);
+    await start({ kv: withBoards([[r, PA]]) });
+    click("recBtn");
+    openBoard(recordRow(r));
+    expect(detailRows()).toHaveLength(1);
+    choose("recSort", "slow");
+    expect(detailRows()).toHaveLength(0);
+    openBoard(boardRowOf(idOf(PA)));
+    expect(detailRows()).toHaveLength(1);
+    choose("recFilter", "8-2");
+    expect(detailRows()).toHaveLength(0);
+  });
+
+  it("盤面の形が無い記録の行は、盤面の欄を押しても開かない", async () => {
+    const old = play(0, 300000);
+    const now = play(1, 200000);
+    await start({
+      kv: withBoards([
+        [old, null],
+        [now, PA],
+      ]),
+    });
+    click("recBtn");
+    expect(recordRow(now).querySelector("td.board .fold")?.textContent).toBe("▾");
+    expect(recordRow(old).querySelector("td.board .fold")).toBeNull();
+    expect(recordRow(old).querySelector("td.board button")).toBeNull();
+    recordRow(old).querySelector<HTMLElement>("td.board")?.click();
+    expect(detailRows()).toHaveLength(0);
+  });
+});
+
+describe("詳しい情報に、備考と、もらった盤面の送ってくれた人のタイムを出す", () => {
+  it("詳しい情報の回の下に、難とひと言を、書いたとおりの文字で出す", async () => {
+    const r1 = play(0, 300000);
+    const r2 = play(1, 200000);
+    await start({
+      kv: withBoards(
+        [
+          [r1, PA],
+          [r2, PA],
+        ],
+        {
+          [MAIN_KEYS.notes]: JSON.stringify({
+            [recordKey(r1)]: { memo: "<b>左下</b>で迷った", hard: true },
+          }),
+        },
+      ),
+    });
+    click("recBtn");
+    choose("recSort", "slow");
+    openBoard(boardRowOf(idOf(PA)));
+    const lines = detailLines();
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toMatch(/^1回目 /);
+    expect(lines[1]).toBe("難 <b>左下</b>で迷った");
+    expect(lines[2]).toMatch(/^2回目 /);
+    expect(document.querySelector("#recList .detail b")).toBeNull();
+    expect(document.querySelector("#recList .detail .hard")?.textContent).toBe("難");
+  });
+
+  it("もらった盤面の回の下に、送ってくれた人のタイムを出す", async () => {
+    const r1 = play(0, 300000);
+    const r2 = play(1, 200000);
+    await start({
+      kv: withBoards(
+        [
+          [r1, PA],
+          [r2, PA],
+        ],
+        {
+          [MAIN_KEYS.received]: JSON.stringify({
+            [recordKey(r1)]: { senderTime: 205000, senderHints: 0, senderAutoX: true },
+          }),
+        },
+      ),
+    });
+    click("recBtn");
+    openBoard(recordRow(r1));
+    const lines = detailLines();
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toMatch(/^1回目 /);
+    expect(lines[1]).toBe("🎁 もらった盤面（送ってくれた人 3:25・ヒント 0 回・自動×）");
+    expect(lines[2]).toMatch(/^2回目 /);
+  });
+
+  it("タイムの無いリンクでもらった盤面は、もらった盤面とだけ出す", async () => {
+    const r = play(0, 300000);
+    await start({
+      kv: withBoards([[r, PA]], {
+        [MAIN_KEYS.received]: JSON.stringify({ [recordKey(r)]: {} }),
+      }),
+    });
+    click("recBtn");
+    openBoard(recordRow(r));
+    expect(detailLines().slice(1)).toEqual(["🎁 もらった盤面"]);
+  });
+});
+
+describe("記録の一覧の行を短くする", () => {
+  it("一覧の遊ぶと送るは、1 文字のボタンで出す", async () => {
+    const r = play(0, 300000);
+    await start({ kv: withBoards([[r, PA]]) });
+    click("recBtn");
+    const buttons = (tr: Element) =>
+      [...tr.querySelectorAll("td.acts button")].map((b) => [
+        b.textContent,
+        b.getAttribute("aria-label"),
+      ]);
+    expect(buttons(recordRow(r))).toEqual([
+      ["遊", "遊ぶ"],
+      ["送", "送る"],
+    ]);
+    choose("recSort", "slow");
+    expect(buttons(boardRowOf(idOf(PA)))).toEqual([
+      ["遊", "遊ぶ"],
+      ["送", "送る"],
+    ]);
+  });
+
+  it("盤面ごとの並びでは、ベストの下に小さく初回を出す", async () => {
+    await start({
+      kv: withBoards([
+        [play(0, 300000), PA],
+        [play(1, 180000), PB],
+        [play(2, 90000), PA],
+      ]),
+    });
+    click("recBtn");
+    choose("recSort", "slow");
+    const heads = [...document.querySelectorAll("#recList thead th")].map(cellText);
+    expect(heads).toEqual(["盤面", "ベスト 初回", "回数", "最少 ヒント", ""]);
+    const best = boardRowOf(idOf(PA)).querySelectorAll(":scope > td")[1];
+    expect(best?.firstChild?.textContent).toBe("1:30");
+    expect(best?.querySelector(".sub")?.textContent).toBe("5:00");
+  });
+});
+
+describe("難しさの名前は、簡単・普通・難しい", () => {
+  it("難しさを選ぶ所と記録の画面に、簡単・普通・難しいと出る", async () => {
+    await start({
+      kv: withBoards([
+        [play(0, 60000, 0, 6, 1), null],
+        [play(1, 120000), null],
+        [play(2, 300000, 0, 10, 3), null],
+      ]),
+    });
+    expect([...$("diff").querySelectorAll("option")].map((o) => o.textContent)).toEqual([
+      "簡単",
+      "普通",
+      "難しい",
+    ]);
+    click("recBtn");
+    expect(summaryRows().map((r) => r[0])).toEqual(["6×6 簡単", "8×8 普通", "10×10 難しい"]);
+    expect([...$("recFilter").querySelectorAll("option")].map((o) => o.textContent)).toContain(
+      "8×8 普通",
+    );
+    expect(
+      recordRow(play(2, 300000, 0, 10, 3)).querySelector("td.board")?.firstChild?.textContent,
+    ).toBe("10×10 難しい");
+  });
+
+  it("クリアの画面と送る文の難しさも、普通と出る", async () => {
+    const h = await start();
+    const p = fixedPuzzle(8, 2, 0);
+    solveByHand(h, p, 205800);
+    expect(text("winText")).toMatch(/^8×8・普通　/);
+    click("winShare");
+    await h.app.whenIdle();
+    expect(lastShared(h)[0]).toBe(`ねこパッチの盤面 ${idOf(p)}（8×8・普通）`);
+  });
+
+  it("送られてきた盤面の案内の難しさも、普通と出る", async () => {
+    await start({ link: linkOf(PA) });
+    expect(text("sharedBoard")).toBe(`8×8・普通　${idOf(PA)}`);
   });
 });

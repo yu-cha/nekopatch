@@ -4,6 +4,7 @@
 // 2026-10-23 に、記録の備考（ひと言と「難」）と「自動×」の印（クリアの画面の書く欄、記録の一覧の ✎）を足した。
 // ナンが書いた備考の文は、HTML の文字列に混ぜず、要素を作ったあとで textContent か value で入れる（判断 c995）。
 // 2026-10-25 に、盤面をほかの人に送る仕組み（「送る」、送られてきた盤面の案内、送ってくれた人との比べ）を足した（判断 73b0）。
+// 2026-10-25 に、記録の一覧の年の見出しと、盤面の欄を押したときの詳しい情報を足し、一覧の行を短くした（「遊」「送」、初回とベストを 1 つの欄に）。
 // ブラウザの機能（保存、問題作りの Worker、保存領域の頼み、ファイルの書き出し）は env を通して使い、テストでは偽物に差し替える。
 
 import {
@@ -11,6 +12,7 @@ import {
   type BoardSort,
   boardId,
   boardLabel,
+  boardPlays,
   boardRows,
   type Category,
   type CellState,
@@ -142,6 +144,8 @@ export function startApp(doc: Document, env: AppEnv): App {
   const boardEl = $("board");
   const sizeSel = $<HTMLSelectElement>("size");
   const diffSel = $<HTMLSelectElement>("diff");
+  // 難しさの名前の出所を LEVEL_NAMES の 1 つにする（index.html の文字は、スクリプトが動くまでの表示）
+  for (const o of diffSel.options) o.textContent = LEVEL_NAMES[Number(o.value)] ?? o.textContent;
   const autoX = $<HTMLInputElement>("autoX");
   const applyBtn = $<HTMLButtonElement>("applyBtn");
   const recPanel = $("recPanel");
@@ -208,6 +212,11 @@ export function startApp(doc: Document, env: AppEnv): App {
   let editingKey: string | null = null;
   /** 書く欄を開いているあいだに、ほかのタブで保存データが変わった（閉じたら一覧を作り直す） */
   let listStale = false;
+  /**
+   * 記録の一覧で、盤面の欄を押して詳しい情報を開いている単位（新しい順は記録の鍵、盤面ごとの並びは
+   * `n|d|符号`）。閉じていれば null。開くのは 1 つだけ
+   */
+  let detailKey: string | null = null;
   let saveFailed = false;
   /** 問題作りの頼みの番号。あとから別の盤面を始めたら、前に頼んだ問題は使わない */
   let puzzleRequest = 0;
@@ -891,20 +900,61 @@ export function startApp(doc: Document, env: AppEnv): App {
   // 記録の一覧は、スマホの幅（360px ほど）でも「遊ぶ」まで見えるよう、セルを 2 段にして列を減らす
   /**
    * 盤面のセル（大きさ・難しさと、下の段に盤面 ID と何回目か。盤面ごとの並びでは「難」も）。
-   * もらった盤面には 🎁 を付ける（ナンとの合意 2026-10-25。送ってくれた人のタイムは、一覧には出さない）
+   * もらった盤面には 🎁 を付ける（ナンとの合意 2026-10-25。送ってくれた人のタイムは、詳しい情報に出す）。
+   * open は、押すと詳しい情報を開く単位（detailKey）。盤面の形が無い記録は null で、押せない。
+   * 鍵は数と | と base64url の文字だけなので、属性にそのまま書ける
    */
   function boardCell(
     n: number,
     d: number,
     id: string | null,
     nth: number,
-    hard = false,
-    gift = false,
+    hard: boolean,
+    gift: boolean,
+    open: string | null,
   ): string {
     const times = nth > 1 ? `<span class="nth">${nth}回目</span>` : "";
     const mark = hard ? '<span class="hard">難</span>' : "";
     const present = gift ? '<span class="gift" role="img" aria-label="もらった盤面">🎁</span>' : "";
-    return `<td class="board">${n}×${n} ${LEVEL_NAMES[d] ?? ""}<span class="sub"><span class="bid">${id ?? "—"}</span>${times}${mark}${present}</span></td>`;
+    const expanded = open !== null && detailKey === open;
+    const fold =
+      open === null ? "" : `<span class="fold" aria-hidden="true">${expanded ? "▴" : "▾"}</span>`;
+    const label = `${n}×${n} ${LEVEL_NAMES[d] ?? ""}<span class="sub"><span class="bid">${id ?? "—"}</span>${fold}${times}${mark}${present}</span>`;
+    return open === null
+      ? `<td class="board">${label}</td>`
+      : `<td class="board"><button type="button" class="boardBtn" data-open="${open}" aria-expanded="${expanded}">${label}</button></td>`;
+  }
+  /** 前回との差（速ければ緑の −、遅ければ赤の +） */
+  function diffText(df: number): string {
+    if (df < 0) return `<span class="faster">−${fmt(-df)}</span>`;
+    return df > 0 ? `<span class="slower">+${fmt(df)}</span>` : "±0:00";
+  }
+  /**
+   * 盤面の詳しい情報の行（ナンとの合意 2026-10-25）。その盤面の記録を 1 回目から順に出す。
+   * me は、新しい順で押した行の記録の鍵（太字にする）。備考の文は、表を作ったあとで入れる（fillNotes）
+   */
+  function detailRow(n: number, d: number, code: string, me: string | null, cols: number): string {
+    let t = '<table class="plays"><tbody>';
+    for (const { record: r, nth, diff } of boardPlays(records, boards, n, d, code)) {
+      const k = recordKey(r);
+      const note = notes.get(k);
+      const dt = new Date(r.at);
+      const ds = `${dt.getFullYear()}/${dt.getMonth() + 1}/${dt.getDate()}<span class="sub">${dt.getHours()}:${String(dt.getMinutes()).padStart(2, "0")}</span>`;
+      const df = diff === null ? "" : `<span class="sub df">${diffText(diff)}</span>`;
+      const ax = note?.autoX === true ? '<span class="sub">自動×</span>' : "";
+      t += `<tr class="${k === me ? "play me" : "play"}"><td>${nth}回目</td><td>${ds}</td><td>${fmt(r.t)}${df}</td><td>ヒント ${r.h}${ax}</td></tr>`;
+      const gift = receivedBoards.get(k);
+      if (gift !== undefined) {
+        // 文は数から作るので、HTML に混ぜてよい
+        const from = gift.sender === null ? "" : `（送ってくれた人 ${scoreLabel(gift.sender)}）`;
+        t += `<tr class="dgift"><td></td><td colspan="3">🎁 もらった盤面${from}</td></tr>`;
+      }
+      if (hasRemark(note))
+        t += `<tr class="dnote"><td></td><td colspan="3" class="remark" data-k="${k}"></td></tr>`;
+    }
+    t +=
+      '</tbody></table><div class="detailBtns"><button type="button" class="detailClose">閉じる</button></div>';
+    return `<tr class="detailRow"><td colspan="${cols}"><div class="detail">${t}</div></td></tr>`;
   }
   /**
    * 新しい順の 1 行のあとに足す行。✎ で開いた記録には書く欄、備考のある記録には備考の行。
@@ -931,7 +981,8 @@ export function startApp(doc: Document, env: AppEnv): App {
     }
   }
   /**
-   * 「遊ぶ」と「送る」のセル。スマホの幅に収まるよう、2 つを縦に並べる。
+   * 「遊ぶ」と「送る」のセル。1 件を 2 行に収めるよう、「遊」「送」の 1 文字にして横に並べる
+   * （ナンとの合意 2026-10-25）。名前（読み上げ）は「遊ぶ」「送る」のまま。
    * t、h、x は、送るときに付けるタイムとヒントの回数と、自動×を使って解いたか。
    * 符号は base64url の文字だけなので、属性にそのまま書ける
    */
@@ -945,46 +996,62 @@ export function startApp(doc: Document, env: AppEnv): App {
   ): string {
     return code === null
       ? "<td></td>"
-      : `<td class="acts"><button type="button" class="play" data-n="${n}" data-d="${d}" data-b="${code}">遊ぶ</button><button type="button" class="send" data-n="${n}" data-d="${d}" data-b="${code}" data-t="${t}" data-h="${h}" data-x="${x ? 1 : 0}">送る</button></td>`;
+      : `<td class="acts"><button type="button" class="play" aria-label="遊ぶ" data-n="${n}" data-d="${d}" data-b="${code}">遊</button><button type="button" class="send" aria-label="送る" data-n="${n}" data-d="${d}" data-b="${code}" data-t="${t}" data-h="${h}" data-x="${x ? 1 : 0}">送</button></td>`;
   }
-  /** 記録の一覧。新しい順は 1 回 1 行で、同じ盤面の前回（初めての盤面は、同じ盤面・難しさの前回）との比べを付ける */
+  /**
+   * 記録の一覧。新しい順は 1 回 1 行で、同じ盤面の前回（初めての盤面は、同じ盤面・難しさの前回）との比べを付け、
+   * 一番上と年が変わるところに年の見出しの行を入れる。盤面ごとの並びは、ベストの下に小さく初回を出す。
+   * 盤面の欄を押して開いた盤面には、行の下に詳しい情報を出す
+   */
   function renderList(): void {
     const sort = recSort.value as ListSort;
     const filter = listFilter();
     let l: string;
     let more: boolean;
     let count: number;
+    let detailShown = false;
     if (sort === "new") {
       const res = historyRows(records, boards, filter, listLimit);
       ({ more } = res);
       count = res.rows.length;
       l =
         '<table><thead><tr><th class="edit"></th><th>日時</th><th class="board">盤面</th><th>タイム<span class="sub">前回比</span></th><th>ヒント</th><th></th></tr></thead><tbody>';
+      let year: number | null = null;
       for (const { record: h, code, id, nth, diff: df } of res.rows) {
         const k = recordKey(h);
         const note = notes.get(k);
         const dt = new Date(h.at);
+        if (dt.getFullYear() !== year) {
+          year = dt.getFullYear();
+          l += `<tr class="yearRow"><th colspan="6">${year}年</th></tr>`;
+        }
         const ds = `${dt.getMonth() + 1}/${dt.getDate()}<span class="sub">${dt.getHours()}:${String(dt.getMinutes()).padStart(2, "0")}</span>`;
-        let c = "—";
-        if (df !== null)
-          c =
-            df < 0
-              ? `<span class="faster">−${fmt(-df)}</span>`
-              : df > 0
-                ? `<span class="slower">+${fmt(df)}</span>`
-                : "±0:00";
+        const c = df === null ? "—" : diffText(df);
         const ax = note?.autoX === true ? '<span class="sub">自動×</span>' : "";
-        l += `<tr><td class="edit"><button type="button" class="noteBtn" data-k="${k}" aria-label="備考を書く" aria-expanded="${editingKey === k}">✎</button></td><td>${ds}</td>${boardCell(h.n, h.d, id, nth, false, receivedBoards.has(k))}<td>${fmt(h.t)}<span class="sub df">${c}</span></td><td>${h.h}${ax}</td>${actsCell(h.n, h.d, code, h.t, h.h, note?.autoX === true)}</tr>${noteRow(k, note)}`;
+        const open = code === null ? null : k;
+        l += `<tr><td class="edit"><button type="button" class="noteBtn" data-k="${k}" aria-label="備考を書く" aria-expanded="${editingKey === k}">✎</button></td><td>${ds}</td>${boardCell(h.n, h.d, id, nth, false, receivedBoards.has(k), open)}<td>${fmt(h.t)}<span class="sub df">${c}</span></td><td>${h.h}${ax}</td>${actsCell(h.n, h.d, code, h.t, h.h, note?.autoX === true)}</tr>${noteRow(k, note)}`;
+        if (code !== null && detailKey === open) {
+          l += detailRow(h.n, h.d, code, k, 6);
+          detailShown = true;
+        }
       }
     } else {
       const res = boardRows(records, boards, filter, sort, listLimit, notes, receivedBoards);
       ({ more } = res);
       count = res.rows.length;
       l =
-        '<table><thead><tr><th class="board">盤面</th><th>初回</th><th>ベスト</th><th>回数</th><th>最少<br>ヒント</th><th></th></tr></thead><tbody>';
-      for (const g of res.rows)
-        l += `<tr>${boardCell(g.n, g.d, g.id, 1, g.hard, g.received)}<td>${fmt(g.first)}</td><td>${fmt(g.best)}</td><td>${g.count}</td><td>${g.minHints}</td>${actsCell(g.n, g.d, g.code, g.first, g.firstHints, g.firstAutoX)}</tr>`;
+        '<table><thead><tr><th class="board">盤面</th><th>ベスト<span class="sub">初回</span></th><th>回数</th><th>最少<br>ヒント</th><th></th></tr></thead><tbody>';
+      for (const g of res.rows) {
+        const open = `${g.n}|${g.d}|${g.code}`;
+        l += `<tr>${boardCell(g.n, g.d, g.id, 1, g.hard, g.received, open)}<td>${fmt(g.best)}<span class="sub">${fmt(g.first)}</span></td><td>${g.count}</td><td>${g.minHints}</td>${actsCell(g.n, g.d, g.code, g.first, g.firstHints, g.firstAutoX)}</tr>`;
+        if (detailKey === open) {
+          l += detailRow(g.n, g.d, g.code, null, 5);
+          detailShown = true;
+        }
+      }
     }
+    // 開いていた盤面が一覧から無くなったら（全部消した、など）、閉じたことにする
+    if (!detailShown) detailKey = null;
     $("recList").innerHTML =
       count > 0
         ? `${l}</tbody></table>`
@@ -995,9 +1062,21 @@ export function startApp(doc: Document, env: AppEnv): App {
   recSort.onchange = () => {
     commitEditor();
     editingKey = null;
+    detailKey = null;
     listLimit = LIST_PAGE;
     renderList();
   };
+  // 盤面の欄を押すと、その盤面の詳しい情報を開く。同じ盤面の欄か「閉じる」を押すと閉じる。開くのは 1 つだけ
+  recList.addEventListener("click", (e) => {
+    const btn = (e.target as Element | null)?.closest<HTMLButtonElement>(
+      "button.boardBtn, button.detailClose",
+    );
+    if (btn === null || btn === undefined) return;
+    const key = btn.classList.contains("boardBtn") ? (btn.dataset.open ?? null) : null;
+    commitEditor();
+    detailKey = key === detailKey ? null : key;
+    renderList();
+  });
   recFilter.onchange = recSort.onchange;
   $("recMore").onclick = () => {
     listLimit += LIST_PAGE;
@@ -1013,8 +1092,10 @@ export function startApp(doc: Document, env: AppEnv): App {
   }
   function disarmPlay(): void {
     playArmed = null;
-    for (const b of $("recList").querySelectorAll<HTMLButtonElement>("button.play"))
-      b.textContent = "遊ぶ";
+    for (const b of $("recList").querySelectorAll<HTMLButtonElement>("button.play.armed")) {
+      b.classList.remove("armed");
+      b.setAttribute("aria-label", "遊ぶ");
+    }
     showPlayMessage(null);
   }
   $("recList").addEventListener("click", (e) => {
@@ -1032,7 +1113,9 @@ export function startApp(doc: Document, env: AppEnv): App {
       disarmPlay();
       const at = env.now();
       playArmed = { key, at };
-      btn.textContent = "もう一度押す";
+      // 1 文字のボタンが広がって表が揺れないよう、文字は「遊」のまま、色と名前で示す
+      btn.classList.add("armed");
+      btn.setAttribute("aria-label", "もう一度押す");
       showPlayMessage(PLAY_MESSAGES.confirm);
       setTimeout(() => {
         if (playArmed?.at === at) disarmPlay();
@@ -1078,6 +1161,7 @@ export function startApp(doc: Document, env: AppEnv): App {
     recPanel.hidden = !recPanel.hidden;
     commitEditor();
     editingKey = null;
+    detailKey = null;
     listStale = false;
     if (!recPanel.hidden) {
       listLimit = LIST_PAGE;
@@ -1092,6 +1176,7 @@ export function startApp(doc: Document, env: AppEnv): App {
   $("recClose").onclick = () => {
     commitEditor();
     editingKey = null;
+    detailKey = null;
     recPanel.hidden = true;
   };
   // 「記録を全部消す」は、間違って押して何年分もの記録を失わないよう、記録の画面の一番下に置き、
@@ -1111,6 +1196,7 @@ export function startApp(doc: Document, env: AppEnv): App {
     notes = new Map();
     receivedBoards = new Map();
     editingKey = null;
+    detailKey = null;
     // 記録を先に消す（盤面の形や備考、もらった盤面の印だけが残っても害は無い）
     markSaved(
       env.store.saveRecords(records) &&

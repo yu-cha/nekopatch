@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { RecordNote } from "./notes.ts";
 import type { ClearRecord } from "./records.ts";
 import {
+  boardPlays,
   boardRows,
   classifyPlays,
   compareWin,
@@ -305,6 +306,37 @@ describe("もう一度遊んだ記録", () => {
       count: 3,
       isBest: false,
     });
+  });
+});
+
+describe("盤面の詳しい情報", () => {
+  it("その盤面の記録を日時の順に、何回目かと前の回との差を付けて出す", () => {
+    const a3 = rec(1761300300000, 8, 2, 100000, 1);
+    const boards = boardsOf([
+      [a1, XA],
+      [b1, XB],
+      [a2, XA],
+      [a3, XA],
+    ]);
+    expect(boardPlays([a1, b1, a2, a3, C], boards, 8, 2, XA)).toEqual([
+      { record: a1, nth: 1, diff: null },
+      { record: a2, nth: 2, diff: 90000 - 300000 },
+      { record: a3, nth: 3, diff: 100000 - 90000 },
+    ]);
+    expect(boardPlays([a1, b1, a2, a3, C], boards, 8, 2, XB)).toEqual([
+      { record: b1, nth: 1, diff: null },
+    ]);
+  });
+
+  it("大きさや難しさが違えば、同じ形でも別の盤面とする", () => {
+    const hard = rec(1761300300000, 8, 3, 90000, 0);
+    const boards = boardsOf([
+      [a1, XA],
+      [hard, XA],
+    ]);
+    expect(boardPlays([a1, hard], boards, 8, 2, XA).map((p) => p.record)).toEqual([a1]);
+    expect(boardPlays([a1, hard], boards, 8, 3, XA).map((p) => p.record)).toEqual([hard]);
+    expect(boardPlays([a1, hard], boards, 6, 2, XA)).toEqual([]);
   });
 });
 

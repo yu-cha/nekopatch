@@ -25,9 +25,11 @@ export {
 } from "./play.ts";
 export { generate, type Puzzle, solutionCells } from "./puzzle.ts";
 export {
+  type BoardPlay,
   type BoardRow,
   type BoardSort,
   type Boards,
+  boardPlays,
   boardRows,
   type Category,
   type CategorySummary,
