@@ -82,6 +82,12 @@ export const PLAY_MESSAGES = {
   broken: "この盤面は遊べませんでした。くろに相談してください。",
 } as const;
 
+/** クリアの画面の「保存」を押したあとの知らせ */
+export const WIN_SAVED_MESSAGES = {
+  saved: "保存しました",
+  failed: "保存できませんでした。「記録」を見てください",
+} as const;
+
 /** 「記録を全部消す」の最後の確かめ（ブラウザの確かめの窓） */
 export const CLEAR_CONFIRM_MESSAGE =
   "記録を全部消します。消した記録は戻せません。本当に消しますか？";
@@ -187,15 +193,17 @@ export function startApp(doc: Document, env: AppEnv): App {
 
   /**
    * key の記録の備考と印を変えて保存する。ほかのタブが書いた分を消さないよう、保存してあるものを読み直してから変える。
-   * 記録がもう無ければ（ほかのタブで全部消した）、書かない
+   * 記録がもう無ければ（ほかのタブで全部消した）、書かない。保存できた（変える所が無かった）ら true
    */
-  function updateNote(key: string, change: NoteChange): void {
+  function updateNote(key: string, change: NoteChange): boolean {
     syncFromStore();
-    if (!records.some((r) => recordKey(r) === key)) return;
+    if (!records.some((r) => recordKey(r) === key)) return false;
     const next = changeNote(notes, key, change);
-    if (JSON.stringify(next.get(key)) === JSON.stringify(notes.get(key))) return;
+    if (JSON.stringify(next.get(key)) === JSON.stringify(notes.get(key))) return true;
     notes = next;
-    markSaved(env.store.saveNotes(notes));
+    const ok = env.store.saveNotes(notes);
+    markSaved(ok);
+    return ok;
   }
 
   function save(): void {
@@ -402,6 +410,7 @@ export function startApp(doc: Document, env: AppEnv): App {
     winMemo.value = "";
     winMemoShown = "";
     winHard.setAttribute("aria-pressed", "false");
+    $("winSaved").hidden = true;
     showPrevNote(cmp.prev);
     $("winText").textContent =
       `${p.N}×${p.N}・${lv}　タイム ${fmt(elapsed)}　ヒント ${hints}回${autoXUsed ? "　自動×" : ""}`;
@@ -605,15 +614,28 @@ export function startApp(doc: Document, env: AppEnv): App {
   }
   /** 欄に出してから変えていない文（変えていなければ保存しない。ほかの所で書いた備考を、空の欄で消さないため） */
   let winMemoShown = "";
-  /** クリアの画面の欄の文を保存する */
-  function commitWinMemo(): void {
-    if (winKey === null || winMemo.value === winMemoShown) return;
-    updateNote(winKey, { memo: winMemo.value });
+  /** クリアの画面の欄の文を保存する。保存できた（変えていなかった）ら true */
+  function commitWinMemo(): boolean {
+    if (winKey === null) return false;
+    if (winMemo.value === winMemoShown) return true;
+    const ok = updateNote(winKey, { memo: winMemo.value });
     winMemoShown = notes.get(winKey)?.memo ?? "";
     winMemo.value = winMemoShown;
     if (!recPanel.hidden && editingKey === null) renderList();
+    return ok;
   }
-  winMemo.addEventListener("change", commitWinMemo);
+  winMemo.addEventListener("change", () => commitWinMemo());
+  // 「保存」を押したら、保存したことを見せる（ナンとの合意 2026-10-25。クリアの画面は閉じない）
+  $("winSave").onclick = () => {
+    if (winKey === null) return;
+    const ok = commitWinMemo();
+    const el = $("winSaved");
+    el.textContent = ok ? WIN_SAVED_MESSAGES.saved : WIN_SAVED_MESSAGES.failed;
+    el.hidden = false;
+  };
+  winMemo.addEventListener("input", () => {
+    $("winSaved").hidden = true;
+  });
   winHard.onclick = () => {
     if (winKey === null) return;
     commitWinMemo();

@@ -602,3 +602,9 @@ button:disabled {
 .rec #recList tr:has(+ tr.noteEdit) td {
   border-bottom: none;
 }
+/* クリアの画面の「保存」を押したあとの知らせ */
+#win #winSaved {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--fg);
+}

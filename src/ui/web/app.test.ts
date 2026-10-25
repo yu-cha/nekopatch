@@ -21,6 +21,7 @@ import {
   IMPORT_MESSAGES,
   PLAY_MESSAGES,
   startApp,
+  WIN_SAVED_MESSAGES,
 } from "./app.ts";
 import { persistMessage } from "./persistence.ts";
 import { MAIN_KEYS, SaveStore, TRIAL_KEYS, trialStorage } from "./save-store.ts";
@@ -1261,6 +1262,44 @@ describe("クリアの画面で備考を書く", () => {
     expect(storedNotes(kv)).toEqual({ [recordKey(r)]: { memo: "左下で迷った" } });
     click("recBtn");
     expect(remarkOf(r)).toBe("左下で迷った");
+  });
+
+  it("クリアの画面の保存を押すと、書いた文を保存して、保存しましたと出す", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    solveTaking(h, 65000);
+    const key = recordKey(storedRecords(kv)[0] ?? A);
+    expect($("winSaved").hidden).toBe(true);
+    // 決定も欄の外も押さずに「保存」を押す
+    typeInto($("winMemo"), "左下で迷った", false);
+    click("winSave");
+    expect(storedNotes(kv)).toEqual({ [key]: { memo: "左下で迷った" } });
+    expect($("winSaved").hidden).toBe(false);
+    expect(text("winSaved")).toBe("保存しました");
+    expect(WIN_SAVED_MESSAGES.saved).toBe("保存しました");
+    expect($("win").hidden).toBe(false);
+    // 書き足すと、「保存しました」は消える
+    typeInto($("winMemo"), "左下で迷った！", false);
+    $("winMemo").dispatchEvent(new Event("input", { bubbles: true }));
+    expect($("winSaved").hidden).toBe(true);
+    // 次にクリアしたときは、「保存しました」は出ていない
+    click("winSave");
+    click("winNext");
+    await h.app.whenIdle();
+    solveTaking(h, 65000);
+    expect($("winSaved").hidden).toBe(true);
+    expect(($("winMemo") as HTMLInputElement).value).toBe("");
+  });
+
+  it("備考を保存できなければ、保存しましたとは出さない", async () => {
+    const kv = new MemoryStorage();
+    const h = await start({ kv });
+    solveTaking(h, 65000);
+    kv.failWrites = true;
+    typeInto($("winMemo"), "左下で迷った", false);
+    click("winSave");
+    expect(text("winSaved")).toBe("保存できませんでした。「記録」を見てください");
+    expect($("recSaveError").hidden).toBe(false);
   });
 
   it("クリアの画面の難を押すと印が付き、もう一度押すと外れる", async () => {
