@@ -478,7 +478,11 @@ button:disabled {
 /* 記録の一覧。スマホの幅でも「遊ぶ」まで見えるよう、すき間を詰め、セルを 2 段にする */
 .rec #recList th,
 .rec #recList td {
-  padding: 6px 4px;
+  padding: 6px 2px;
+}
+/* 1 件を 2 行に収めるよう、列の幅を決めている見出し（タイム、ヒント）の文字を小さくする（2026-10-25） */
+.rec #recList thead th {
+  font-size: 0.74rem;
 }
 .rec #recList .board {
   text-align: left;
@@ -638,11 +642,11 @@ button:disabled {
   white-space: nowrap;
 }
 .rec td.acts button {
-  padding: 3px 7px;
+  padding: 3px 6px;
   font-size: 0.8rem;
 }
 .rec td.acts button + button {
-  margin-left: 4px;
+  margin-left: 3px;
 }
 /* 遊んでいる途中に「遊」を押したとき（もう一度押すと始まる） */
 .rec td.acts button.armed {
