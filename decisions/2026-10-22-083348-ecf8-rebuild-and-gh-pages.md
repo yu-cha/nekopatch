@@ -2,7 +2,7 @@
 title: 798a の形に組み直し、手元でビルドしたものを gh-pages ブランチから配信する
 category: 運用
 status: 採用
-review: 未確認
+review: 確認済み
 date: 2026-10-22
 ---
 

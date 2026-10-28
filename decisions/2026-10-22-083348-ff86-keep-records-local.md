@@ -2,7 +2,7 @@
 title: クリアの記録は今の localStorage のキーと形のまま上限なく置き、消さないよう頼む。確かめ用のページは別のキーを使う
 category: データ
 status: 採用
-review: 未確認
+review: 確認済み
 date: 2026-10-22
 ---
 
